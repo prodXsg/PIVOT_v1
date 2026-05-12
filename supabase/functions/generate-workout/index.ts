@@ -33,6 +33,46 @@ function setsReps(sets: number, reps: string) {
   return `${sets} sets - ${sanitizeInput(reps, 30)} reps`;
 }
 
+function emphasisLabelFromMuscle(m: string): string {
+  if (m === "core") return "Core";
+  return m.slice(0, 1).toUpperCase() + m.slice(1);
+}
+
+function collectRepresentedEmphasisLabels(
+  emphasis: ParsedEmphasis | null,
+  picked: ExerciseMeta[],
+): string[] {
+  if (!emphasis) return [];
+  const labels: string[] = [];
+  const add = (label: string) => {
+    if (!labels.includes(label)) labels.push(label);
+  };
+  for (const m of emphasis.muscles) {
+    if (picked.some((p) => p.primaryMuscle === m)) add(emphasisLabelFromMuscle(m));
+  }
+  if (emphasis.rearDeltBoost && picked.some((p) => p.pivotTags.includes("rear-delt"))) add("Rear Delts");
+  if (emphasis.forearmsBoost && picked.some((p) => p.movementPattern === "elbow-flexion")) add("Forearms");
+  return labels;
+}
+
+function joinHumanList(parts: string[]): string {
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
+function composeFocusTitle(baseFocus: string, representedEmphasisLabels: string[]): string {
+  if (!representedEmphasisLabels.length) return baseFocus;
+  const short = representedEmphasisLabels.slice(0, 2);
+  return `${baseFocus} · ${joinHumanList(short)} Emphasis`;
+}
+
+function composeAdaptiveEmphasisNote(baseFocus: string, representedEmphasisLabels: string[]): string | null {
+  if (!representedEmphasisLabels.length) return null;
+  return `Built around ${baseFocus} with extra focus on ${joinHumanList(representedEmphasisLabels).toLowerCase()}.`;
+}
+
 function fallbackFromDeterministic(
   focus: string,
   picked: ExerciseMeta[],
@@ -40,14 +80,17 @@ function fallbackFromDeterministic(
   sleep: number,
   energy: number,
   soreness: number,
+  emphasis?: ParsedEmphasis | null,
 ) {
   const lowReadiness = sleep < 6 || energy <= 4 || soreness >= 7;
   const sets = lowReadiness ? 2 : 3;
   const reps = lowReadiness ? "10-12" : "8-10";
   const setsScheme = picked.map(() => sets);
   const estimated = estimateSessionMinutes(picked, setsScheme);
+  const represented = collectRepresentedEmphasisLabels(emphasis ?? null, picked);
+  const emphasisNote = composeAdaptiveEmphasisNote(focus, represented);
   return {
-    focus,
+    focus: composeFocusTitle(focus, represented),
     duration: clamp(estimated, rules.minDuration, rules.maxDuration, rules.maxDuration),
     rationale: lowReadiness
       ? `Built around ${focus} with reduced joint stress and fatigue to match your readiness.`
@@ -77,6 +120,7 @@ function fallbackFromDeterministic(
         ? ["Reduced fatigue load due to low readiness markers."]
         : ["Kept normal training load because readiness was adequate."],
     },
+    adaptiveNote: emphasisNote ?? undefined,
   };
 }
 
@@ -181,7 +225,7 @@ Deno.serve(async (req) => {
     });
     const picked = rankedResult.picked.slice(0, rules.maxExercises);
     if (!picked.length) throw new Error("No deterministic exercises available");
-    fallbackDet = fallbackFromDeterministic(focus, picked, rules, sleep, energy, soreness);
+    fallbackDet = fallbackFromDeterministic(focus, picked, rules, sleep, energy, soreness, emphasisForScoring);
 
     const chosenNames = picked.map((e) => e.name);
     const allowedSet = new Set(chosenNames.map(canonicalName));
@@ -231,6 +275,9 @@ Deno.serve(async (req) => {
       exercises.map((e) => clamp(Number(e.setsReps.split(" ")[0]), 2, 4, defaultSets)),
     );
     const duration = clamp(est, rules.minDuration, rules.maxDuration, rules.maxDuration);
+    const representedEmphasis = collectRepresentedEmphasisLabels(emphasisForScoring, picked);
+    const adaptiveEmphasisNote = composeAdaptiveEmphasisNote(focus, representedEmphasis);
+
     const reasoning = {
       summary: lowReadiness
         ? "Reduced fatigue load due to readiness signals while preserving workout identity."
@@ -244,6 +291,7 @@ Deno.serve(async (req) => {
         `Hard max exercise count applied: ${rules.maxExercises}.`,
       ],
       adaptations: [
+        ...(adaptiveEmphasisNote ? [adaptiveEmphasisNote] : []),
         lowReadiness
           ? "Reduced high-fatigue/high-joint-stress choices due to low sleep/energy or high soreness."
           : "Maintained normal fatigue profile because readiness was sufficient.",
@@ -254,7 +302,7 @@ Deno.serve(async (req) => {
     };
 
     return json({
-      focus,
+      focus: composeFocusTitle(focus, representedEmphasis),
       duration,
       rationale: sanitizeInput(
         raw.rationale ??
@@ -271,6 +319,7 @@ Deno.serve(async (req) => {
         fatigueCost: picked[i]?.fatigueCost,
       })),
       reasoning,
+      adaptiveNote: adaptiveEmphasisNote ?? undefined,
       progression: {
         movementCoverage: picked.reduce<Record<string, number>>((acc, ex) => {
           acc[ex.movementPattern] = (acc[ex.movementPattern] ?? 0) + 1;

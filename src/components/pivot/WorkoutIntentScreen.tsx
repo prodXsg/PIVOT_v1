@@ -38,20 +38,6 @@ export type ReadinessSnapshot = {
   time: number;
 };
 
-function formatSessionFocusLabel(structure: string, emphasisIds: string[]): string {
-  if (!emphasisIds.length) return structure;
-  const labels = emphasisIds
-    .map((id) => EMPHASIS_OPTIONS.find((o) => o.id === id)?.label)
-    .filter(Boolean) as string[];
-  if (!labels.length) return structure;
-  const lower = labels.map((l) => l.toLowerCase());
-  let tail: string;
-  if (lower.length === 1) tail = lower[0];
-  else if (lower.length === 2) tail = `${lower[0]} and ${lower[1]}`;
-  else tail = `${lower.slice(0, -1).join(", ")}, and ${lower[lower.length - 1]}`;
-  return `${structure} — extra attention to ${tail}`;
-}
-
 function structureChipStyle(selected: boolean, animating: boolean): React.CSSProperties {
   return {
     width: "100%",
@@ -163,10 +149,7 @@ export function WorkoutIntentScreen({
       const elapsed = Date.now() - startedAt;
       const wait = Math.max(0, MIN_LOAD_MS - elapsed);
       window.setTimeout(() => {
-        setTodayWorkout({
-          ...workout,
-          focus: formatSessionFocusLabel(focusStructure, focusEmphasis),
-        });
+        setTodayWorkout(workout);
         incrementCheckInCount();
         onComplete();
       }, wait);

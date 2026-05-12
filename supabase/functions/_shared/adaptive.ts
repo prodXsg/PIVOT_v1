@@ -86,7 +86,7 @@ export const FOCUS_LIST: Focus[] = [
   "Biceps", "Triceps", "Glutes", "Hamstrings", "Quads", "Calves", "Arms", "Rear Delts",
 ];
 
-/** Optional user emphasis (multi) layered on Push/Pull/Legs/Full Body — additive scoring hints only. */
+/** Optional user emphasis (multi) layered on Push/Pull/Legs/Full Body — scored first, then minimally guaranteed when feasible. */
 export type ParsedEmphasis = {
   muscles: Muscle[];
   rearDeltBoost: boolean;
@@ -100,6 +100,9 @@ export type EmphasisScoringTargets = {
   needForearmFlex: boolean;
 };
 
+type EmphasisGuaranteeKind = "muscle" | "rear-delt" | "forearms";
+type EmphasisGuaranteeTarget = { kind: EmphasisGuaranteeKind; muscle?: Muscle };
+
 function buildEmphasisTargets(emphasis: ParsedEmphasis | null | undefined, picked: ExerciseMeta[]): EmphasisScoringTargets | null {
   if (!emphasis) return null;
   const uncoveredMuscles = new Set<Muscle>();
@@ -110,6 +113,41 @@ function buildEmphasisTargets(emphasis: ParsedEmphasis | null | undefined, picke
   const needForearmFlex = !!(emphasis.forearmsBoost && !picked.some((p) => p.movementPattern === "elbow-flexion"));
   if (!uncoveredMuscles.size && !needRearDeltTag && !needForearmFlex) return null;
   return { uncoveredMuscles, needRearDeltTag, needForearmFlex };
+}
+
+function listMissingEmphasisTargets(emphasisTargets: EmphasisScoringTargets | null | undefined): EmphasisGuaranteeTarget[] {
+  if (!emphasisTargets) return [];
+  const out: EmphasisGuaranteeTarget[] = [];
+  for (const m of emphasisTargets.uncoveredMuscles) out.push({ kind: "muscle", muscle: m });
+  if (emphasisTargets.needRearDeltTag) out.push({ kind: "rear-delt" });
+  if (emphasisTargets.needForearmFlex) out.push({ kind: "forearms" });
+  return out;
+}
+
+function exerciseMatchesEmphasisTarget(ex: ExerciseMeta, target: EmphasisGuaranteeTarget): boolean {
+  if (target.kind === "muscle") return target.muscle === ex.primaryMuscle;
+  if (target.kind === "rear-delt") return ex.pivotTags.includes("rear-delt");
+  return ex.movementPattern === "elbow-flexion";
+}
+
+function exerciseMatchesAnyEmphasisTarget(ex: ExerciseMeta, targets: EmphasisGuaranteeTarget[]): boolean {
+  for (const target of targets) {
+    if (exerciseMatchesEmphasisTarget(ex, target)) return true;
+  }
+  return false;
+}
+
+function emphasisTargetCount(emphasis: ParsedEmphasis | null | undefined): number {
+  if (!emphasis) return 0;
+  return emphasis.muscles.length + (emphasis.rearDeltBoost ? 1 : 0) + (emphasis.forearmsBoost ? 1 : 0);
+}
+
+function isDirectEmphasisExercise(ex: ExerciseMeta, emphasis: ParsedEmphasis | null | undefined): boolean {
+  if (!emphasis) return false;
+  if (emphasis.muscles.includes(ex.primaryMuscle)) return true;
+  if (emphasis.rearDeltBoost && ex.pivotTags.includes("rear-delt")) return true;
+  if (emphasis.forearmsBoost && ex.movementPattern === "elbow-flexion") return true;
+  return false;
 }
 
 function orderPickedForEmphasis(picked: ExerciseMeta[], emphasis: ParsedEmphasis | null | undefined): ExerciseMeta[] {
@@ -287,10 +325,10 @@ export function scoreExercise(args: {
   if (emphasis) {
     const unc = emphasisTargets?.uncoveredMuscles;
     if (unc && unc.size > 0 && unc.has(ex.primaryMuscle)) {
-      score += 28;
+      score += 34;
       reasons.push("user-emphasis-uncovered-primary");
     } else if (emphasis.muscles.length > 0 && emphasis.muscles.includes(ex.primaryMuscle)) {
-      score += 11;
+      score += 14;
       reasons.push("user-emphasis-primary");
     }
 
@@ -303,18 +341,18 @@ export function scoreExercise(args: {
     }
 
     if (emphasisTargets?.needRearDeltTag && ex.pivotTags.includes("rear-delt")) {
-      score += 26;
+      score += 30;
       reasons.push("user-emphasis-rear-delt-priority");
     } else if (emphasis.rearDeltBoost && ex.pivotTags.includes("rear-delt")) {
-      score += 9;
+      score += 12;
       reasons.push("user-emphasis-rear-delt");
     }
 
     if (emphasisTargets?.needForearmFlex && ex.movementPattern === "elbow-flexion") {
-      score += 22;
+      score += 28;
       reasons.push("user-emphasis-forearms-priority");
     } else if (emphasis.forearmsBoost && ex.movementPattern === "elbow-flexion") {
-      score += 10;
+      score += 13;
       reasons.push("user-emphasis-forearms");
     }
   }
@@ -390,6 +428,26 @@ export function chooseExercises(args: {
 
   while (picked.length < args.maxExercises) {
     const emphasisTargets = buildEmphasisTargets(args.emphasis, picked);
+    const missingTargets = listMissingEmphasisTargets(emphasisTargets);
+    // Preserve workout identity first, then reserve remaining capacity for explicit emphasis guarantees.
+    const identityReserve =
+      args.focus === "Full Body"
+        ? Math.min(2, Math.max(1, args.maxExercises - 1))
+        : Math.min(3, Math.max(2, args.maxExercises - 1));
+    const emphasisCapacity = Math.max(0, args.maxExercises - identityReserve);
+    const requestedEmphasisCount = emphasisTargetCount(args.emphasis);
+    // Target a stronger, but bounded, Layer-2 shaping effect.
+    const directEmphasisQuota = Math.min(
+      emphasisCapacity,
+      requestedEmphasisCount,
+      Math.max(1, Math.round(args.maxExercises * 0.4)),
+    );
+    const pickedDirectEmphasisCount = picked.filter((p) => isDirectEmphasisExercise(p, args.emphasis)).length;
+    const neededDirectQuota = Math.max(0, directEmphasisQuota - pickedDirectEmphasisCount);
+    const activeMissingTargets = missingTargets.slice(0, emphasisCapacity);
+    const remainingSlots = args.maxExercises - picked.length;
+    // Reserve final slots for explicit user emphasis guarantees.
+    const mustReserveForEmphasis = activeMissingTargets.length > 0 && remainingSlots <= activeMissingTargets.length;
     const sorted = [...EXERCISES]
       .map((ex) => {
         const evald = scoreExercise({
@@ -411,12 +469,77 @@ export function chooseExercises(args: {
 
     let pickedThisRound = false;
     for (const item of sorted) {
+      if (!isDirectEmphasisExercise(item.ex, args.emphasis) && neededDirectQuota > 0 && (remainingSlots - 1) < neededDirectQuota) {
+        rejected.push({ exercise: item.ex.name, reason: "emphasis-direct-quota-reserved" });
+        continue;
+      }
+      if (mustReserveForEmphasis && !exerciseMatchesAnyEmphasisTarget(item.ex, activeMissingTargets)) {
+        rejected.push({ exercise: item.ex.name, reason: "emphasis-guarantee-slot-reserved" });
+        continue;
+      }
       if (tryAcceptOne({ ex: item.ex, score: item.score })) {
         pickedThisRound = true;
         break;
       }
     }
     if (!pickedThisRound) break;
+  }
+
+  // Lightweight post-pass: try one-for-one safe swaps to satisfy any still-missing explicit emphasis targets.
+  const finalEmphasisTargets = buildEmphasisTargets(args.emphasis, picked);
+  const finalMissing = listMissingEmphasisTargets(finalEmphasisTargets);
+  const finalIdentityReserve =
+    args.focus === "Full Body"
+      ? Math.min(2, Math.max(1, args.maxExercises - 1))
+      : Math.min(3, Math.max(2, args.maxExercises - 1));
+  const finalEmphasisCapacity = Math.max(0, args.maxExercises - finalIdentityReserve);
+  const stillMissing = finalMissing.slice(0, finalEmphasisCapacity);
+  if (stillMissing.length) {
+    const focusRule = FOCUS_RULES[args.focus];
+    for (const target of stillMissing) {
+      const candidates = EXERCISES
+        .filter((ex) => !picked.some((p) => canonicalName(p.name) === canonicalName(ex.name)))
+        .filter((ex) => exerciseMatchesEmphasisTarget(ex, target))
+        .map((ex) => {
+          const evald = scoreExercise({
+            ...args,
+            ex,
+            recent: args.recentExercises,
+            usedPatterns: new Set(picked.map((p) => p.movementPattern)),
+            equipmentContext: args.equipmentContext,
+            memory: args.memory,
+            emphasis: args.emphasis,
+            emphasisTargets: finalEmphasisTargets,
+          });
+          return { ex, score: evald.score };
+        })
+        .filter((x) => x.score >= 0)
+        .sort((a, b) => b.score - a.score || a.ex.name.localeCompare(b.ex.name));
+      if (!candidates.length) continue;
+
+      const candidate = candidates[0].ex;
+      if (picked.some((p) => canonicalName(p.name) === canonicalName(candidate.name))) continue;
+      const protectedNames = new Set(
+        picked
+          .filter((p) => {
+            const isFocusPrimary = focusRule.primary.includes(p.primaryMuscle);
+            const isFocusPattern = focusRule.priorityPatterns.includes(p.movementPattern);
+            const isExplicitEmphasisDirect =
+              !!args.emphasis &&
+              (
+                args.emphasis.muscles.includes(p.primaryMuscle) ||
+                (args.emphasis.rearDeltBoost && p.pivotTags.includes("rear-delt")) ||
+                (args.emphasis.forearmsBoost && p.movementPattern === "elbow-flexion")
+              );
+            return isFocusPrimary || isFocusPattern || isExplicitEmphasisDirect;
+          })
+          .map((p) => canonicalName(p.name)),
+      );
+      const replaceIdx = picked.findIndex((p) => !protectedNames.has(canonicalName(p.name)));
+      if (replaceIdx < 0) continue;
+
+      picked[replaceIdx] = candidate;
+    }
   }
 
   const ordered = orderPickedForEmphasis(picked, args.emphasis);
