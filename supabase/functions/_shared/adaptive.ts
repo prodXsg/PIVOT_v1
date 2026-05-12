@@ -86,6 +86,73 @@ export const FOCUS_LIST: Focus[] = [
   "Biceps", "Triceps", "Glutes", "Hamstrings", "Quads", "Calves", "Arms", "Rear Delts",
 ];
 
+/** Optional user emphasis (multi) layered on Push/Pull/Legs/Full Body — additive scoring hints only. */
+export type ParsedEmphasis = {
+  muscles: Muscle[];
+  rearDeltBoost: boolean;
+  forearmsBoost: boolean;
+};
+
+/** Per-iteration: user emphasis not yet represented by a direct primary (or tag / pattern for special cases). */
+export type EmphasisScoringTargets = {
+  uncoveredMuscles: Set<Muscle>;
+  needRearDeltTag: boolean;
+  needForearmFlex: boolean;
+};
+
+function buildEmphasisTargets(emphasis: ParsedEmphasis | null | undefined, picked: ExerciseMeta[]): EmphasisScoringTargets | null {
+  if (!emphasis) return null;
+  const uncoveredMuscles = new Set<Muscle>();
+  for (const m of emphasis.muscles) {
+    if (!picked.some((p) => p.primaryMuscle === m)) uncoveredMuscles.add(m);
+  }
+  const needRearDeltTag = !!(emphasis.rearDeltBoost && !picked.some((p) => p.pivotTags.includes("rear-delt")));
+  const needForearmFlex = !!(emphasis.forearmsBoost && !picked.some((p) => p.movementPattern === "elbow-flexion"));
+  if (!uncoveredMuscles.size && !needRearDeltTag && !needForearmFlex) return null;
+  return { uncoveredMuscles, needRearDeltTag, needForearmFlex };
+}
+
+function orderPickedForEmphasis(picked: ExerciseMeta[], emphasis: ParsedEmphasis | null | undefined): ExerciseMeta[] {
+  if (!emphasis || (!emphasis.muscles.length && !emphasis.rearDeltBoost && !emphasis.forearmsBoost)) return picked;
+  const muscleSet = new Set(emphasis.muscles);
+  const isDirect = (ex: ExerciseMeta): boolean => {
+    if (muscleSet.has(ex.primaryMuscle)) return true;
+    if (emphasis.rearDeltBoost && ex.pivotTags.includes("rear-delt")) return true;
+    if (emphasis.forearmsBoost && ex.movementPattern === "elbow-flexion") return true;
+    return false;
+  };
+  const direct = picked.filter(isDirect);
+  const rest = picked.filter((e) => !isDirect(e));
+  return [...direct, ...rest];
+}
+
+/** Maps client `focusEmphasis` ids to deterministic scoring hints. Unknown ids are ignored. */
+export function parseFocusEmphasis(raw: unknown): ParsedEmphasis {
+  const ids = Array.isArray(raw)
+    ? raw.map((x) => String(x).toLowerCase().trim()).filter(Boolean)
+    : [];
+  const muscles: Muscle[] = [];
+  const add = (m: Muscle) => {
+    if (!muscles.includes(m)) muscles.push(m);
+  };
+  let rearDeltBoost = false;
+  let forearmsBoost = false;
+  for (const id of ids) {
+    if (id === "chest") add("chest");
+    else if (id === "back") add("back");
+    else if (id === "shoulders") add("shoulders");
+    else if (id === "rear-delts" || id === "rear delts") rearDeltBoost = true;
+    else if (id === "biceps") add("biceps");
+    else if (id === "triceps") add("triceps");
+    else if (id === "glutes") add("glutes");
+    else if (id === "hamstrings") add("hamstrings");
+    else if (id === "calves") add("calves");
+    else if (id === "abs-core" || id === "core") add("core");
+    else if (id === "forearms") forearmsBoost = true;
+  }
+  return { muscles, rearDeltBoost, forearmsBoost };
+}
+
 export const EXERCISES: ExerciseMeta[] = [
   { name: "Dumbbell Bench Press", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 420, fatigueCost: 7, pivotTags: ["no-barbell", "bench-required"], kind: "compound" },
   { name: "Machine Chest Press", primaryMuscle: "chest", secondaryMuscles: ["triceps"], movementPattern: "horizontal-press", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly"], kind: "compound" },
@@ -177,8 +244,10 @@ export function scoreExercise(args: {
   usedPatterns: Set<MovementPattern>;
   equipmentContext: string;
   memory?: AdaptiveMemory;
+  emphasis?: ParsedEmphasis | null;
+  emphasisTargets?: EmphasisScoringTargets | null;
 }) {
-  const { ex, focus, sleep, energy, soreness, note, recent, usedPatterns, equipmentContext, memory } = args;
+  const { ex, focus, sleep, energy, soreness, note, recent, usedPatterns, equipmentContext, memory, emphasis, emphasisTargets } = args;
   const f = FOCUS_RULES[focus];
   const n = note.toLowerCase();
   let score = 0;
@@ -215,6 +284,41 @@ export function scoreExercise(args: {
   if (fail > 0) { const v = Math.min(5, fail * 0.5); score -= v; reasons.push("failed-completion-penalty"); }
   if (pain > 0 && ex.jointStress !== "low") { const v = Math.min(6, pain * 0.7); score -= v; reasons.push("pain-memory-penalty"); }
 
+  if (emphasis) {
+    const unc = emphasisTargets?.uncoveredMuscles;
+    if (unc && unc.size > 0 && unc.has(ex.primaryMuscle)) {
+      score += 28;
+      reasons.push("user-emphasis-uncovered-primary");
+    } else if (emphasis.muscles.length > 0 && emphasis.muscles.includes(ex.primaryMuscle)) {
+      score += 11;
+      reasons.push("user-emphasis-primary");
+    }
+
+    if (unc && unc.size > 0 && ex.secondaryMuscles.some((s) => unc.has(s))) {
+      score += 8;
+      reasons.push("user-emphasis-uncovered-secondary");
+    } else if (emphasis.muscles.length > 0 && emphasis.muscles.some((m) => ex.secondaryMuscles.includes(m))) {
+      score += 5;
+      reasons.push("user-emphasis-secondary");
+    }
+
+    if (emphasisTargets?.needRearDeltTag && ex.pivotTags.includes("rear-delt")) {
+      score += 26;
+      reasons.push("user-emphasis-rear-delt-priority");
+    } else if (emphasis.rearDeltBoost && ex.pivotTags.includes("rear-delt")) {
+      score += 9;
+      reasons.push("user-emphasis-rear-delt");
+    }
+
+    if (emphasisTargets?.needForearmFlex && ex.movementPattern === "elbow-flexion") {
+      score += 22;
+      reasons.push("user-emphasis-forearms-priority");
+    } else if (emphasis.forearmsBoost && ex.movementPattern === "elbow-flexion") {
+      score += 10;
+      reasons.push("user-emphasis-forearms");
+    }
+  }
+
   return { score, reasons };
 }
 
@@ -240,59 +344,94 @@ export function chooseExercises(args: {
   recentExercises: string[];
   equipmentContext: string;
   memory?: AdaptiveMemory;
+  emphasis?: ParsedEmphasis | null;
 }) {
   const usedPatterns = new Set<MovementPattern>();
   const picked: ExerciseMeta[] = [];
   const rejected: Array<{ exercise: string; reason: string }> = [];
-  const scoring: ScoringBreakdown[] = [];
-  const sorted = [...EXERCISES]
-    .map((ex) => {
-      const evald = scoreExercise({
-        ...args,
-        ex,
-        recent: args.recentExercises,
-        usedPatterns,
-        equipmentContext: args.equipmentContext,
-        memory: args.memory,
-      });
-      scoring.push({ exercise: ex.name, score: evald.score, reasons: evald.reasons });
-      return { ex, score: evald.score };
-    })
-    .sort((a, b) => b.score - a.score || a.ex.name.localeCompare(b.ex.name));
+  let lastSorted: { ex: ExerciseMeta; score: number }[] = [];
+  let lastDebugScoring: ScoringBreakdown[] = [];
 
-  for (const item of sorted) {
-    if (picked.length >= args.maxExercises) break;
+  const tryAcceptOne = (item: { ex: ExerciseMeta; score: number }): boolean => {
     const ex = item.ex;
-    if (item.score < 0) { rejected.push({ exercise: ex.name, reason: "score-below-zero" }); continue; }
-
+    if (item.score < 0) {
+      rejected.push({ exercise: ex.name, reason: "score-below-zero" });
+      return false;
+    }
     const dupPrimary = picked.filter((p) => p.primaryMuscle === ex.primaryMuscle).length;
-    if (dupPrimary >= 2) { rejected.push({ exercise: ex.name, reason: "primary-muscle-overconcentration" }); continue; }
-    if (picked.some((p) => canonicalName(p.name) === canonicalName(ex.name))) { rejected.push({ exercise: ex.name, reason: "duplicate-exercise" }); continue; }
-
-    // Push/pull balance protection for full body.
+    if (dupPrimary >= 2) {
+      rejected.push({ exercise: ex.name, reason: "primary-muscle-overconcentration" });
+      return false;
+    }
+    if (picked.some((p) => canonicalName(p.name) === canonicalName(ex.name))) {
+      rejected.push({ exercise: ex.name, reason: "duplicate-exercise" });
+      return false;
+    }
     if (args.focus === "Full Body") {
       const hasPush = picked.some((p) => p.movementPattern === "horizontal-press" || p.movementPattern === "vertical-press");
       const hasPull = picked.some((p) => p.movementPattern === "horizontal-pull" || p.movementPattern === "vertical-pull");
       if (picked.length >= args.maxExercises - 1) {
         const thisIsPush = ex.movementPattern === "horizontal-press" || ex.movementPattern === "vertical-press";
         const thisIsPull = ex.movementPattern === "horizontal-pull" || ex.movementPattern === "vertical-pull";
-        if (!hasPush && !thisIsPush) { rejected.push({ exercise: ex.name, reason: "full-body-push-balance-protection" }); continue; }
-        if (!hasPull && !thisIsPull) { rejected.push({ exercise: ex.name, reason: "full-body-pull-balance-protection" }); continue; }
+        if (!hasPush && !thisIsPush) {
+          rejected.push({ exercise: ex.name, reason: "full-body-push-balance-protection" });
+          return false;
+        }
+        if (!hasPull && !thisIsPull) {
+          rejected.push({ exercise: ex.name, reason: "full-body-pull-balance-protection" });
+          return false;
+        }
       }
     }
-
     picked.push(ex);
     usedPatterns.add(ex.movementPattern);
+    return true;
+  };
+
+  while (picked.length < args.maxExercises) {
+    const emphasisTargets = buildEmphasisTargets(args.emphasis, picked);
+    const sorted = [...EXERCISES]
+      .map((ex) => {
+        const evald = scoreExercise({
+          ...args,
+          ex,
+          recent: args.recentExercises,
+          usedPatterns,
+          equipmentContext: args.equipmentContext,
+          memory: args.memory,
+          emphasis: args.emphasis,
+          emphasisTargets,
+        });
+        return { ex, score: evald.score, reasons: evald.reasons };
+      })
+      .sort((a, b) => b.score - a.score || a.ex.name.localeCompare(b.ex.name));
+
+    lastSorted = sorted.map(({ ex, score }) => ({ ex, score }));
+    lastDebugScoring = sorted.map(({ ex, score, reasons }) => ({ exercise: ex.name, score, reasons }));
+
+    let pickedThisRound = false;
+    for (const item of sorted) {
+      if (tryAcceptOne({ ex: item.ex, score: item.score })) {
+        pickedThisRound = true;
+        break;
+      }
+    }
+    if (!pickedThisRound) break;
   }
 
+  const ordered = orderPickedForEmphasis(picked, args.emphasis);
+
   return {
-    picked,
-    ranked: sorted.slice(0, Math.max(args.maxExercises + 4, 8)),
-    debug: { scoring, rejected },
+    picked: ordered,
+    ranked: lastSorted.slice(0, Math.max(args.maxExercises + 4, 8)),
+    debug: { scoring: lastDebugScoring, rejected },
   };
 }
 
 export function inferFocus(raw: string): Focus {
-  const s = String(raw ?? "");
-  return (FOCUS_LIST.includes(s as Focus) ? s : "Push") as Focus;
+  const s = String(raw ?? "").trim();
+  if (FOCUS_LIST.includes(s as Focus)) return s as Focus;
+  const first = s.split(/\s*(?:·|•|—)\s*/)[0]?.trim() ?? "";
+  if (FOCUS_LIST.includes(first as Focus)) return first as Focus;
+  return "Push";
 }

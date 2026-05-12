@@ -1,21 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowLeft, ArrowRight, Info } from "lucide-react";
-import { CheckIn, useApp } from "@/context/AppContext";
-import { defaultWorkout } from "@/lib/mockData";
+import type { ReadinessSnapshot } from "./WorkoutIntentScreen";
 
 type NumericKey = "sleep" | "energy" | "soreness" | "time";
 type Selections = Partial<Record<NumericKey, number>>;
 
-const TOTAL_QUESTIONS = 5;
-const MIN_LOAD_MS = 3000;
-
-const LOADING_STAGES = [
-  "Analyzing your readiness...",
-  "Adjusting intensity...",
-  "Building your workout structure...",
-  "Optimizing for your time window...",
-  "Almost ready...",
-];
+const TOTAL_QUESTIONS = 4;
 
 const QUESTIONS: {
   key: NumericKey;
@@ -69,10 +59,6 @@ const QUESTIONS: {
   },
 ];
 
-const FOCUS_CHIPS = ["Push", "Pull", "Legs", "Full Body"] as const;
-const FOCUS_INFO =
-  "Push: chest/shoulders/triceps. Pull: back/biceps. Legs: lower body. Full Body: everything.";
-
 function chipStyle(selected: boolean, animating: boolean): React.CSSProperties {
   return {
     width: "100%",
@@ -88,32 +74,36 @@ function chipStyle(selected: boolean, animating: boolean): React.CSSProperties {
     cursor: "pointer",
     whiteSpace: "normal",
     lineHeight: 1.1,
-    transition: "background 180ms ease-out, color 180ms ease-out, box-shadow 180ms ease-out, transform 160ms ease-out",
+    transition: "background 180ms ease-out, color 180ms ease-out, box-shadow 180ms ease-out, border-color 180ms ease-out, transform 160ms ease-out",
     animation: animating ? "chip-pop 200ms ease-out" : undefined,
   };
 }
 
-export function CheckInScreen({ onBack, onComplete }: { onBack: () => void; onComplete: () => void }) {
-  const { generateWorkout, setTodayWorkout, incrementCheckInCount } = useApp();
-  const [selections, setSelections] = useState<Selections>({});
-  const [focus, setFocus] = useState<string | null>(null);
-  const [activeTooltip, setActiveTooltip] = useState<NumericKey | "focus" | null>(null);
+export function CheckInScreen({
+  onBack,
+  onReadinessComplete,
+  initialReadiness,
+}: {
+  onBack: () => void;
+  onReadinessComplete: (r: ReadinessSnapshot) => void;
+  /** When returning from the intent screen, restore the four numeric answers. */
+  initialReadiness?: ReadinessSnapshot | null;
+}) {
+  const [selections, setSelections] = useState<Selections>(() =>
+    initialReadiness
+      ? {
+          sleep: initialReadiness.sleep,
+          energy: initialReadiness.energy,
+          soreness: initialReadiness.soreness,
+          time: initialReadiness.time,
+        }
+      : {},
+  );
+  const [activeTooltip, setActiveTooltip] = useState<NumericKey | null>(null);
   const [chipAnim, setChipAnim] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(false);
-  const [stage, setStage] = useState(0);
-  const [error, setError] = useState<string | null>(null);
 
-  const answeredCount = Object.keys(selections).length + (focus ? 1 : 0);
+  const answeredCount = Object.keys(selections).length;
   const allAnswered = answeredCount === TOTAL_QUESTIONS;
-
-  useEffect(() => {
-    if (!loading) return;
-    setStage(0);
-    const interval = window.setInterval(() => {
-      setStage((s) => Math.min(s + 1, LOADING_STAGES.length - 1));
-    }, 1500);
-    return () => window.clearInterval(interval);
-  }, [loading]);
 
   const animateChip = (key: string) => {
     setChipAnim((a) => ({ ...a, [key]: true }));
@@ -132,109 +122,15 @@ export function CheckInScreen({ onBack, onComplete }: { onBack: () => void; onCo
     animateChip(`${key}-${label}`);
   };
 
-  const selectFocus = (value: string) => {
-    setFocus(value);
-    if (activeTooltip === "focus") setActiveTooltip(null);
-    animateChip(`focus-${value}`);
-  };
-
-  const submit = async () => {
-    if (!allAnswered || loading) return;
-    setLoading(true);
-    setError(null);
-    const startedAt = Date.now();
-
-    const checkIn: CheckIn = {
+  const continueToIntent = () => {
+    if (!allAnswered) return;
+    onReadinessComplete({
       sleep: selections.sleep!,
       energy: selections.energy!,
       soreness: selections.soreness!,
       time: selections.time!,
-      focus: focus ?? undefined,
-    };
-
-    try {
-      const workout = await generateWorkout(checkIn);
-      if (!workout?.exercises?.length) {
-        setLoading(false);
-        setError("Could not build a valid workout for your constraints. Try again.");
-        return;
-      }
-      const elapsed = Date.now() - startedAt;
-      const wait = Math.max(0, MIN_LOAD_MS - elapsed);
-      window.setTimeout(() => {
-        setTodayWorkout(workout);
-        incrementCheckInCount();
-        onComplete();
-      }, wait);
-    } catch {
-      setLoading(false);
-      setError("Couldn't generate a workout right now. Check connection and try again.");
-    }
+    });
   };
-
-  if (error && !loading) {
-    return (
-      <div className="absolute inset-0 flex flex-col bg-background overflow-hidden" style={{ paddingTop: "env(safe-area-inset-top)", animation: "cin-enter 280ms ease-out both" }}>
-        <div className="flex items-center px-5 shrink-0" style={{ height: 60 }}>
-          <button onClick={onBack} aria-label="Go back" className="size-9 flex items-center justify-center text-foreground/50 hover:text-foreground transition-colors shrink-0">
-            <ArrowLeft size={22} strokeWidth={2} />
-          </button>
-          <h1 className="flex-1 text-center" style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.3px", lineHeight: 1.2 }}>
-            Generation failed
-          </h1>
-          <div style={{ width: 36 }} />
-        </div>
-        <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-          <p className="text-sm text-foreground/70 leading-relaxed max-w-[300px]">{error}</p>
-          <button
-            type="button"
-            onClick={submit}
-            className="mt-6 w-full max-w-[320px] bg-primary text-primary-foreground rounded-full py-3.5 font-semibold text-sm active:scale-[0.99] transition-transform"
-          >
-            Try again
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0A0A0A] overflow-hidden">
-        <div className="absolute top-0 left-0 right-0 flex justify-center" style={{ paddingTop: "max(52px, calc(env(safe-area-inset-top) + 20px))" }}>
-          <p style={{ fontSize: 15, fontWeight: 900, letterSpacing: 6, color: "rgba(255,255,255,0.90)" }}>PIVOT</p>
-        </div>
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background: "radial-gradient(circle at 50% 40%, rgba(199,247,61,0.05) 0%, transparent 65%)",
-            animation: "cin-bg-pulse 3s ease-in-out infinite",
-          }}
-        />
-        <p key={stage} className="px-8 text-center" style={{ fontSize: 18, fontWeight: 500, color: "rgba(255,255,255,0.92)", animation: "cin-stage 300ms ease-out both" }}>
-          {LOADING_STAGES[stage]}
-        </p>
-        <div className="flex gap-1.5 mt-5">
-          {LOADING_STAGES.map((_, i) => (
-            <div
-              key={i}
-              style={{
-                width: i === stage ? 20 : 6,
-                height: 6,
-                borderRadius: 999,
-                background: i <= stage ? "#C7F73D" : "rgba(255,255,255,0.18)",
-                transition: "width 300ms ease-out, background 300ms ease-out",
-              }}
-            />
-          ))}
-        </div>
-        <style>{`
-          @keyframes cin-stage { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-          @keyframes cin-bg-pulse { 0%, 100% { opacity: 0.65; } 50% { opacity: 1; } }
-        `}</style>
-      </div>
-    );
-  }
 
   return (
     <div
@@ -242,17 +138,54 @@ export function CheckInScreen({ onBack, onComplete }: { onBack: () => void; onCo
       style={{ paddingTop: "env(safe-area-inset-top)", animation: "cin-enter 280ms ease-out both" }}
       onClick={() => setActiveTooltip(null)}
     >
-      <div className="flex items-center px-5 shrink-0" style={{ height: 60 }}>
-        <button onClick={onBack} aria-label="Go back" className="size-9 flex items-center justify-center text-foreground/50 hover:text-foreground transition-colors shrink-0">
-          <ArrowLeft size={22} strokeWidth={2} />
-        </button>
-        <h1 className="flex-1 text-center" style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.3px", lineHeight: 1.2 }}>
-          Today's Readiness
-        </h1>
-        <div style={{ width: 36 }} />
+      <div
+        className="shrink-0 px-5"
+        style={{
+          paddingTop: "max(10px, env(safe-area-inset-top))",
+          paddingBottom: 12,
+        }}
+      >
+        <div className="grid grid-cols-[40px_1fr_40px] items-start gap-1">
+          <button
+            onClick={onBack}
+            aria-label="Go back"
+            className="size-9 flex items-center justify-center text-foreground/50 hover:text-foreground transition-colors shrink-0"
+            style={{ marginTop: 2 }}
+          >
+            <ArrowLeft size={22} strokeWidth={2} />
+          </button>
+          <div className="flex flex-col items-center text-center min-w-0 pt-0.5">
+            <h1
+              style={{
+                fontSize: 23,
+                fontWeight: 700,
+                letterSpacing: "-0.45px",
+                lineHeight: 1.18,
+                color: "hsl(var(--foreground))",
+              }}
+            >
+              How are you feeling today?
+            </h1>
+            <p
+              style={{
+                marginTop: 10,
+                maxWidth: 280,
+                marginLeft: "auto",
+                marginRight: "auto",
+                fontSize: 13,
+                fontWeight: 400,
+                lineHeight: 1.45,
+                color: "hsl(var(--foreground)/0.48)",
+              }}
+            >
+              A few honest taps. Pivot builds around your reality.
+            </p>
+          </div>
+          <div aria-hidden style={{ width: 40 }} />
+        </div>
       </div>
 
-      <div className="flex-1 flex flex-col px-5 overflow-hidden" style={{ gap: 10, paddingTop: 10 }}>
+      <div className="flex-1 flex flex-col px-5 overflow-hidden" style={{ gap: 10, paddingTop: 6 }}>
         {QUESTIONS.map((q, i) => (
           <QuestionModule
             key={q.key}
@@ -288,45 +221,12 @@ export function CheckInScreen({ onBack, onComplete }: { onBack: () => void; onCo
             </div>
           </QuestionModule>
         ))}
-
-        <QuestionModule
-          index={4}
-          label="What do you want to train?"
-          info={FOCUS_INFO}
-          tooltipOpen={activeTooltip === "focus"}
-          onToggleInfo={(e) => {
-            e.stopPropagation();
-            setActiveTooltip((t) => (t === "focus" ? null : "focus"));
-          }}
-        >
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 7 }}>
-            {FOCUS_CHIPS.map((chip) => {
-              const selected = focus === chip;
-              return (
-                <button
-                  key={chip}
-                  type="button"
-                  aria-pressed={selected}
-                  aria-label={`Training focus: ${chip}`}
-                  className="pivot-checkin-chip"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    selectFocus(chip);
-                  }}
-                  style={{ ...chipStyle(selected, !!chipAnim[`focus-${chip}`]), fontSize: chip === "Full Body" ? 11 : 12, padding: "0 4px" }}
-                >
-                  {chip}
-                </button>
-              );
-            })}
-          </div>
-        </QuestionModule>
       </div>
 
       <div className="px-4 shrink-0" style={{ paddingTop: 10, paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
         <button
           type="button"
-          onClick={submit}
+          onClick={continueToIntent}
           disabled={!allAnswered}
           aria-live="polite"
           className="relative w-full flex items-center justify-center font-bold active:scale-[0.97]"
@@ -341,7 +241,7 @@ export function CheckInScreen({ onBack, onComplete }: { onBack: () => void; onCo
             transition: "background 200ms ease-out, color 200ms ease-out, transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1)",
           }}
         >
-          {allAnswered ? "Generate Workout" : answeredCount === 0 ? "Answer all 5 to continue" : `${answeredCount} of 5 answered`}
+          {allAnswered ? "Continue" : answeredCount === 0 ? "Answer all 4 to continue" : `${answeredCount} of 4 answered`}
           {allAnswered && <ArrowRight size={18} style={{ position: "absolute", right: 16 }} />}
         </button>
       </div>

@@ -192,7 +192,7 @@ export function AccountCreationScreen({
               transition: "background 200ms ease-out, color 200ms ease-out",
             }}
           >
-            Start Training →
+            Send verification code
           </button>
         </div>
       </form>

@@ -16,6 +16,8 @@ export type CheckIn = {
   soreness: number;
   time: number;
   focus?: string;
+  /** Optional muscle emphasis ids (e.g. chest, rear-delts) layered on top of `focus`. */
+  focusEmphasis?: string[];
   note?: string;
 };
 

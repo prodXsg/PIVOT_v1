@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import type { CheckIn } from "@/context/AppContext";
+import { baseStructureFromFocusLabel } from "@/lib/focusDisplay";
 
 function getGreeting(hour: number, name: string): string {
   const salutation =
@@ -139,7 +140,7 @@ export function HomeScreen({
   const indicators = todayWorkout && isGenerated ? [
     { label: "Readiness", value: getReadinessLabel(lastCheckIn) },
     { label: "Intensity", value: getIntensityLabel(todayWorkout.duration, lastCheckIn) },
-    { label: "Focus", value: todayWorkout.focus.split(" ")[0] },
+    { label: "Focus", value: baseStructureFromFocusLabel(todayWorkout.focus) },
     { label: "Duration", value: `${todayWorkout.duration} min` },
   ] : [];
 
@@ -353,7 +354,7 @@ export function HomeScreen({
           <p
             style={{ textAlign: "center", fontSize: 13, color: "hsl(var(--foreground)/0.50)", fontStyle: "italic", animation: "home-rise 300ms 100ms ease-out both" }}
           >
-            {getRecovery(todayWorkout.focus)}
+            {getRecovery(baseStructureFromFocusLabel(todayWorkout.focus))}
           </p>
           {lastQuality && (
             <p

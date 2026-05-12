@@ -97,11 +97,9 @@ export function HowItWorksScreen({ onContinue }: { onContinue: () => void }) {
         ))}
       </div>
 
-      {/* Slide CTA */}
-      <div style={{ marginTop: 16, animation: "hiw-rise 360ms 290ms ease-out both" }}>
-        <div style={{ borderRadius: 20, background: "#0A0A0A", padding: "14px 14px 16px" }}>
-          <SlideToStart label="Let's go" onComplete={onContinue} />
-        </div>
+      {/* Slide CTA — sits on screen bg; SlideToStart retains its own track styling */}
+      <div style={{ marginTop: 20, animation: "hiw-rise 360ms 290ms ease-out both" }}>
+        <SlideToStart label="Let's go" onComplete={onContinue} />
       </div>
 
       <style>{`

@@ -1,5 +1,15 @@
 import { callGemini, corsHeaders, json, sanitizeInput } from "../_shared/gemini.ts";
-import { AdaptiveMemory, ExerciseMeta, chooseExercises, estimateSessionMinutes, inferFocus, canonicalName, shouldDebugAdaptive } from "../_shared/adaptive.ts";
+import {
+  AdaptiveMemory,
+  ExerciseMeta,
+  chooseExercises,
+  estimateSessionMinutes,
+  inferFocus,
+  canonicalName,
+  shouldDebugAdaptive,
+  parseFocusEmphasis,
+  type ParsedEmphasis,
+} from "../_shared/adaptive.ts";
 
 type RawPlan = {
   rationale?: string;
@@ -70,8 +80,20 @@ function fallbackFromDeterministic(
   };
 }
 
+function emphasisPromptFragment(e: ParsedEmphasis, baseFocus: string): string {
+  const parts: string[] = [];
+  for (const m of e.muscles) parts.push(m === "core" ? "abs/core" : m);
+  if (e.rearDeltBoost) parts.push("rear delts");
+  if (e.forearmsBoost) parts.push("forearms");
+  if (!parts.length) return "";
+  const safe = parts.map((p) => sanitizeInput(p, 20));
+  const bf = sanitizeInput(baseFocus, 24);
+  return `, with added intent toward ${safe.join(", ")}. In rationale and cues, acknowledge that direct work for those areas is intentionally included while keeping the overall ${bf} session balanced.`;
+}
+
 function buildPrompt(params: {
   focus: string;
+  emphasisNote: string;
   rules: ReturnType<typeof timeRules>;
   ranked: { name: string; score: number }[];
   chosenNames: string[];
@@ -83,7 +105,7 @@ function buildPrompt(params: {
   const rankedText = params.ranked.map((r) => `- ${r.name} (score ${r.score})`).join("\n");
   const chosenText = params.chosenNames.map((n) => `- ${n}`).join("\n");
   return `ABSOLUTE RULES - FOLLOW FIRST:
-1. Today's workout focus is ${params.focus}. You MUST NOT change the focus.
+1. Today's workout focus is ${params.focus}${params.emphasisNote}. You MUST NOT change the base session type (${params.focus}).
 2. duration_minutes must be ${params.rules.minDuration}-${params.rules.maxDuration}.
 3. Use exactly these selected exercises and preserve their order intent:
 ${chosenText}
@@ -136,6 +158,12 @@ Deno.serve(async (req) => {
       : {};
 
     const focus = inferFocus(String(body.focus ?? "Push"));
+    const emphasisParsed = parseFocusEmphasis(body.focusEmphasis);
+    const emphasisForScoring =
+      emphasisParsed.muscles.length || emphasisParsed.rearDeltBoost || emphasisParsed.forearmsBoost
+        ? emphasisParsed
+        : null;
+    const emphasisNote = emphasisPromptFragment(emphasisParsed, focus);
     const rules = timeRules(time);
     fallbackFocus = focus;
     fallbackRules = rules;
@@ -149,6 +177,7 @@ Deno.serve(async (req) => {
       recentExercises,
       equipmentContext,
       memory: adaptiveMemory,
+      emphasis: emphasisForScoring,
     });
     const picked = rankedResult.picked.slice(0, rules.maxExercises);
     if (!picked.length) throw new Error("No deterministic exercises available");
@@ -159,6 +188,7 @@ Deno.serve(async (req) => {
     const raw = (await callGemini(
       buildPrompt({
         focus,
+        emphasisNote,
         rules,
         ranked: rankedResult.ranked.map((r) => ({ name: r.ex.name, score: Math.round(r.score) })),
         chosenNames,

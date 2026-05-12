@@ -4,6 +4,7 @@ import { MobileFrame } from "@/components/pivot/MobileFrame";
 import { BottomNav } from "@/components/pivot/BottomNav";
 import { HomeScreen } from "@/components/pivot/HomeScreen";
 import { CheckInScreen } from "@/components/pivot/CheckInScreen";
+import { WorkoutIntentScreen, type ReadinessSnapshot } from "@/components/pivot/WorkoutIntentScreen";
 import { WorkoutScreen } from "@/components/pivot/WorkoutScreen";
 import { PlanScreen } from "@/components/pivot/PlanScreen";
 import { InsightsScreen } from "@/components/pivot/InsightsScreen";
@@ -16,7 +17,7 @@ import { OTPScreen } from "@/components/pivot/OTPScreen";
 import { toast } from "sonner";
 
 type AppFlow = "hero" | "how-it-works" | "auth" | "account-creation" | "otp" | "app";
-type HomeFlow = "home" | "checkin" | "workout" | "workout-preview";
+type HomeFlow = "home" | "checkin" | "checkin-intent" | "workout" | "workout-preview";
 
 function getInitialAppFlow(): AppFlow {
   try {
@@ -59,6 +60,7 @@ function PivotApp() {
 
   const [appFlow, setAppFlow] = useState<AppFlow>(getInitialAppFlow);
   const [homeFlow, setHomeFlow] = useState<HomeFlow>(getInitialHomeFlow);
+  const [readinessDraft, setReadinessDraft] = useState<ReadinessSnapshot | null>(null);
   const [otpEmail, setOtpEmail] = useState("");
 
   const sliderLabel: "Get Started" | "I'm Back" | "Continue Workout" =
@@ -117,6 +119,7 @@ function PivotApp() {
       setAppFlow("hero");
       setHomeFlow("home");
       setOtpEmail("");
+      setReadinessDraft(null);
       setTab("home");
     };
     window.addEventListener("pivot:reset-app", handler);
@@ -188,12 +191,30 @@ function PivotApp() {
     if (homeFlow === "checkin") {
       return (
         <CheckInScreen
-          onBack={() => setHomeFlow("home")}
+          initialReadiness={readinessDraft}
+          onBack={() => {
+            setReadinessDraft(null);
+            setHomeFlow("home");
+          }}
+          onReadinessComplete={(r) => {
+            setReadinessDraft(r);
+            setHomeFlow("checkin-intent");
+          }}
+        />
+      );
+    }
+
+    if (homeFlow === "checkin-intent" && readinessDraft) {
+      return (
+        <WorkoutIntentScreen
+          readiness={readinessDraft}
+          onBack={() => setHomeFlow("checkin")}
           onComplete={() => {
             try {
               localStorage.setItem("pivot_last_checkin_date", new Date().toISOString().slice(0, 10));
               window.dispatchEvent(new Event("pivot:checkin-updated"));
             } catch {}
+            setReadinessDraft(null);
             setWorkoutState("WORKOUT_GENERATED");
             if (!hasGeneratedWorkout) setHasGeneratedWorkout(true);
             setHomeFlow("home");

@@ -6,6 +6,11 @@ import { PivotModal } from "./PivotModal";
 import { ExerciseImage } from "./ExerciseImage";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  exercisePrimaryMatchesIntentPhrase,
+  intentPhraseForExerciseSignal,
+  parseWorkoutFocusHeader,
+} from "@/lib/focusDisplay";
 
 export function WorkoutScreen({
   onBack,
@@ -56,6 +61,8 @@ export function WorkoutScreen({
 
   const exercises = todayWorkout.exercises;
   const totalCount = todayWorkout.originalExerciseCount ?? exercises.length;
+  const focusHeader = parseWorkoutFocusHeader(todayWorkout.focus);
+  const intentSignalTail = intentPhraseForExerciseSignal(focusHeader.hint);
 
   const currentIds = new Set(exercises.map((e) => e.id));
   const doneCount = Object.entries(exerciseStatusById).filter(([id, st]) => currentIds.has(id) && st === "completed").length;
@@ -138,12 +145,15 @@ export function WorkoutScreen({
           >
             <ArrowLeft size={22} />
           </button>
-          <div className="flex-1 ml-1">
+          <div className="flex-1 ml-1 min-w-0">
             <p className="text-[15px] font-semibold leading-tight truncate">
-              {isPreview ? "Today's Workout" : todayWorkout.focus}
+              {isPreview ? "Today's Workout" : focusHeader.main}
             </p>
+            {!isPreview && focusHeader.hint && (
+              <p className="text-[11px] text-foreground/44 leading-snug truncate mt-0.5">{focusHeader.hint}</p>
+            )}
             {!isPreview && (
-              <p className="text-[12px] text-foreground/50">
+              <p className={`text-[12px] text-foreground/50 ${focusHeader.hint ? "mt-0.5" : ""}`}>
                 Exercise {displayExNum} of {totalCount}
               </p>
             )}
@@ -181,6 +191,10 @@ export function WorkoutScreen({
             const isInactive = isDone || isSkipped || isPartial;
             const isMenuOpen = optionsOpenId === ex.id;
             const isUndoOpen = undoPromptId === ex.id;
+            const showIntentSignal =
+              !isPreview &&
+              !!intentSignalTail &&
+              exercisePrimaryMatchesIntentPhrase(intentSignalTail, ex.primaryMuscle);
 
             return (
               <li
@@ -203,6 +217,8 @@ export function WorkoutScreen({
                     ? "3px solid rgba(199,247,61,0.30)"
                     : isPartial
                     ? "3px solid rgba(199,247,61,0.15)"
+                    : showIntentSignal && !isInactive
+                    ? "3px solid rgba(199,247,61,0.20)"
                     : undefined,
                   transition: "opacity 300ms ease-out, background 300ms ease-out",
                   animation: `workout-rise 300ms ${i * 55}ms ease-out both`,
