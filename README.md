@@ -1,162 +1,269 @@
-# Pivot — Workouts That Adapt to Your Day
+# Pivot
 
-Pivot is a mobile-first fitness app that rewrites your workout every morning based on a 15-second check-in. Too tired? Not enough time? Shoulder tweaky? Pivot adjusts the plan before you step into the gym.
+**Adaptive workouts that adjust to your actual day, not a fixed template.**
 
----
+Pivot is a mobile-first AI fitness app that dynamically composes workouts based on readiness, recovery, soreness, available time, and real-world constraints.
 
-## How It Works
+Instead of following a rigid training plan, users complete a lightweight daily check-in and Pivot generates a personalized workout that adapts to:
 
-1. **Daily check-in** — 4 sliders: sleep quality, energy level, soreness, time available. Optional text note for anything else (e.g. "my shoulder is tweaky").
-2. **AI workout generation** — Gemini 2.5 Flash reads your check-in and generates a tailored workout: right exercises, right intensity, right duration.
-3. **In-workout pivot** — If a piece of equipment is unavailable or something hurts mid-session, hit the Pivot button on any exercise. Describe the constraint, get an instant swap.
-4. **Weekly summary** — Every week, see your training patterns, what you adapted, and what to focus on next.
+* energy levels
+* sleep quality
+* soreness
+* available workout time
+* equipment limitations
+* pain or movement constraints
 
----
-
-## Core Features
-
-- **Adaptive check-in → workout** — AI selects focus, exercises, sets/reps based on your actual state
-- **Live exercise swap** — Swap any exercise mid-workout with a constraint description
-- **Re-entry deload** — Returns you at 70% intensity after 4+ days off to avoid injury
-- **Weekly insights** — AI summary of your week with pattern detection
-- **Past summaries** — Weekly summaries saved to localStorage and browsable in-app
-- **5-day plan view** — Provisional schedule that updates after each check-in
-- **Dark mode first** — `#C7F73D` accent, Inter font, iPhone 17 Pro frame on desktop
-- **Fully offline for non-AI features** — navigation, plan view, and history work without a connection
+The system combines deterministic adaptive logic with AI-assisted workout generation to create sessions that feel intentional, personalized, and context-aware.
 
 ---
 
-## Tech Stack
+# Why Pivot Exists
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18 + TypeScript + Vite |
-| Styling | Tailwind CSS v3 + shadcn/ui |
-| State | React Context + localStorage |
-| AI | Google Gemini 2.5 Flash |
-| Backend | Supabase Edge Functions (Deno) |
-| Routing | React Router v6 |
+Most fitness apps optimize for consistency of plans.
 
----
+Pivot optimizes for consistency of training.
 
-## Running Locally
+The system assumes:
 
-### Prerequisites
-- Node.js 18+ or Bun
-- Supabase CLI (`npm install -g supabase`)
-- A Supabase project
-- A Google AI Studio API key (Gemini)
+* recovery fluctuates daily
+* gym environments are unpredictable
+* users miss sessions
+* energy levels change
+* adherence matters more than rigid perfection
 
-### 1. Clone and install
-
-```bash
-git clone <your-repo-url>
-cd remix-of-pivot-daily-main
-npm install
-```
-
-### 2. Set environment variables
-
-```bash
-cp .env.example .env.local
-# Edit .env.local with your Supabase URL and anon key
-```
-
-### 3. Set the Gemini API key as a Supabase secret
-
-```bash
-supabase secrets set GEMINI_API_KEY=your_gemini_key_here
-```
-
-> The Gemini key is **only** stored as a server-side Supabase secret. It is never exposed to the browser.
-
-### 4. Start Supabase edge functions locally
-
-```bash
-supabase start
-supabase functions serve
-```
-
-### 5. Start the frontend
-
-```bash
-npm run dev
-# Opens at http://localhost:8080
-```
+Instead of forcing users to follow static programming, Pivot continuously adapts around the user’s real-world condition.
 
 ---
 
-## Deploying to Vercel
+# Core Features
 
-### 1. Push to GitHub
+## Adaptive Daily Check-In
 
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/your-username/pivot.git
-git push -u origin main
-```
+Users complete a lightweight readiness check-in including:
 
-### 2. Connect to Vercel
+* sleep quality
+* energy level
+* soreness
+* available workout time
+* optional contextual notes
 
-1. Go to [vercel.com](https://vercel.com) → New Project → Import your repo
-2. Framework: **Vite**
-3. Build command: `npm run build`
-4. Output directory: `dist`
+Example:
 
-### 3. Set environment variables in Vercel
+> “Left shoulder feels tweaky today.”
 
-In your Vercel project settings → Environment Variables:
+The system dynamically adjusts:
 
-| Name | Value |
-|---|---|
-| `VITE_SUPABASE_URL` | `https://your-project.supabase.co` |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | Your Supabase anon key |
-
-> The Gemini API key is a **Supabase secret** — set it via `supabase secrets set`, not in Vercel.
-
-### 4. Deploy Supabase edge functions
-
-```bash
-supabase functions deploy generate-workout
-supabase functions deploy swap-exercise
-supabase functions deploy generate-reentry-workout
-supabase functions deploy generate-weekly-summary
-```
+* workout focus
+* exercise selection
+* intensity
+* volume
+* session duration
 
 ---
 
-## Environment Variables
+## Constraint-Aware Workout Generation
 
-| Variable | Where | Purpose |
-|---|---|---|
-| `VITE_SUPABASE_URL` | `.env.local` / Vercel | Supabase project URL |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | `.env.local` / Vercel | Supabase anon key (safe for browser) |
-| `GEMINI_API_KEY` | Supabase secret only | Google Gemini API key (server-side only, never in browser) |
+Pivot uses a hybrid adaptive engine combining:
+
+* deterministic scoring
+* movement-pattern balancing
+* recovery-aware logic
+* AI-assisted composition
+
+to generate workouts that:
+
+* preserve workout identity
+* respect recovery constraints
+* adapt around user intent
+* maintain session quality
+
+Examples:
+
+* Pull + abs/core emphasis
+* Full Body + hamstrings + calves
+* Legs + glute emphasis
 
 ---
 
-## Edge Cases Handled
+## Layered Workout Intent System
 
-| Scenario | Behaviour |
-|---|---|
-| Gemini API down or slow | Falls back to a sensible default workout instantly |
-| Network offline | App still loads; non-AI screens (Plan, past summaries) work from localStorage |
-| 4+ days missed | Automatically detects absence and generates a 70% deload workout |
-| Extreme check-in values | Numeric inputs clamped server-side before reaching Gemini |
-| User note too long (>300 chars) | Truncated server-side before prompt injection |
-| Prompt injection attempt | Curly braces and backticks stripped from all user inputs |
-| Toast overflow | Max 1 toast shown at a time; auto-dismissed after 5 seconds |
-| Workout load fails | WorkoutScreen shows an error state with a "Go back" button |
+The workout engine separates:
+
+* workout identity
+  from:
+* emphasis modifiers
+
+Layer 1:
+
+* Push
+* Pull
+* Legs
+* Full Body
+
+Layer 2:
+
+* shoulders
+* calves
+* hamstrings
+* abs/core
+* rear delts
+* forearms
+* and other emphasis areas
+
+The adaptive engine uses constraint-aware composition logic so workouts remain structurally coherent while still reflecting explicit user priorities.
 
 ---
 
-## AI Functions
+## In-Workout Pivoting
 
-| Function | Trigger | Input | Fallback |
-|---|---|---|---|
-| `generate-workout` | Daily check-in | Sleep, energy, soreness, time, optional note | Upper Push default workout |
-| `generate-reentry-workout` | 4+ day absence detected | None (uses profile + last session) | Full-body deload workout |
-| `swap-exercise` | Pivot button mid-workout | Exercise name, constraint description | Cable Crossovers |
-| `generate-weekly-summary` | Insights tab open | Week stats | Static summary from mockData |
+Every exercise supports live replacement.
+
+If:
+
+* equipment is unavailable
+* pain appears mid-session
+* movement feels uncomfortable
+* the gym is crowded
+
+users can tap:
+
+> Pivot
+
+and describe the issue.
+
+The adaptive engine generates a replacement while preserving:
+
+* workout structure
+* muscle intent
+* movement quality
+* duration balance
+
+---
+
+## Recovery-Aware Re-Entry
+
+If users miss multiple training days, Pivot automatically detects inactivity and generates:
+
+* reduced intensity
+* lower fatigue
+* recovery-aware re-entry workouts
+
+This helps reduce:
+
+* injury risk
+* excessive soreness
+* unsustainable training spikes
+
+---
+
+## Weekly Insights
+
+Pivot generates adaptive weekly summaries including:
+
+* training consistency
+* recovery patterns
+* skipped movements
+* recurring soreness
+* workout emphasis trends
+* adaptation behaviors
+
+Summaries are stored locally and remain browsable in-app.
+
+---
+
+# Adaptive Engine Architecture
+
+Pivot uses a hybrid architecture combining:
+
+* deterministic constraint systems
+* adaptive scoring
+* AI-assisted workout composition
+
+The system evolved from:
+
+* weighted template selection
+
+toward:
+
+* constraint-aware adaptive workout composition
+
+Core adaptive behaviors include:
+
+* workout identity preservation
+* emphasis slot reservation
+* readiness-aware scaling
+* movement-pattern balancing
+* adaptive fallback handling
+* deterministic safety constraints
+* recovery-aware prioritization
+* live exercise replacement
+* graceful degradation under conflicting constraints
+
+The engine prioritizes:
+
+1. safety and recovery constraints
+2. explicit user-selected emphasis areas
+3. workout identity preservation
+4. optimization and balancing heuristics
+
+---
+
+# Tech Stack
+
+| Layer            | Technology                     |
+| ---------------- | ------------------------------ |
+| Frontend         | React 18 + TypeScript + Vite   |
+| Styling          | Tailwind CSS v3 + shadcn/ui    |
+| State Management | React Context + localStorage   |
+| Backend          | Supabase Edge Functions (Deno) |
+| AI               | Google Gemini 2.5 Flash        |
+| Routing          | React Router v6                |
+
+---
+
+# Failure Handling & Edge Cases
+
+| Scenario                  | Behavior                                         |
+| ------------------------- | ------------------------------------------------ |
+| Gemini unavailable        | Falls back to deterministic default workouts     |
+| Network offline           | Non-AI features continue working                 |
+| 4+ missed training days   | Generates adaptive deload/re-entry sessions      |
+| Extreme readiness values  | Inputs clamped server-side                       |
+| Long user notes           | Truncated server-side                            |
+| Prompt injection attempts | User inputs sanitized before AI processing       |
+| Workout load failure      | Graceful recovery/error states                   |
+| Conflicting constraints   | Adaptive prioritization and graceful degradation |
+
+---
+
+# Design Principles
+
+Pivot prioritizes:
+
+* adaptive realism over rigid programming
+* recovery-aware training
+* explainable personalization
+* deterministic safety constraints
+* lightweight AI augmentation
+* graceful degradation
+* mobile-first interaction design
+
+---
+
+# Future Direction
+
+Planned evolution areas include:
+
+* progression tracking
+* movement-level performance memory
+* adaptive microcycles
+* fatigue accumulation modeling
+* long-term recovery adaptation
+* richer workout-composition intelligence
+* deeper personalization systems
+
+---
+
+# License
+
+Private project. All rights reserved.
