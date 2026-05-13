@@ -596,6 +596,27 @@ export function chooseExercises(args: {
   const rejected: Array<{ exercise: string; reason: string }> = [];
   let lastSorted: { ex: ExerciseMeta; score: number }[] = [];
   let lastDebugScoring: ScoringBreakdown[] = [];
+  const arbitrationDebug: {
+    activated?: boolean;
+    earlyExit?: string;
+    focus?: Focus;
+    maxExercises?: number;
+    missingTargets?: EmphasisGuaranteeTarget[];
+    layer2InsertionTargets?: EmphasisGuaranteeTarget[];
+    anchors?: MovementPattern[];
+    haveAnchors?: boolean;
+    anchorSlotsCount?: number;
+    hasRedundantStructuralSlots?: boolean;
+    protectedIndices?: number[];
+    patternCounts?: Record<string, number>;
+    chosenReplaceIdx?: number;
+    chosenReplaceExercise?: string;
+    candidateScores?: Array<{ target: EmphasisGuaranteeTarget; candidate: string; score: number | null; reason?: string }>;
+    replacedWith?: string;
+    replacementFailed?: string;
+  } | null = shouldDebugAdaptive()
+    ? { focus: args.focus, maxExercises: args.maxExercises }
+    : null;
 
   const tryAcceptOne = (item: { ex: ExerciseMeta; score: number }): boolean => {
     const ex = item.ex;
@@ -799,6 +820,16 @@ export function chooseExercises(args: {
     });
 
     const canArbitrate = args.maxExercises >= 6 && layer2InsertionTargets.length > 0;
+    if (arbitrationDebug) {
+      arbitrationDebug.missingTargets = missingNow;
+      arbitrationDebug.layer2InsertionTargets = layer2InsertionTargets;
+      arbitrationDebug.activated = !!canArbitrate;
+      if (!canArbitrate) {
+        arbitrationDebug.earlyExit = args.maxExercises < 6
+          ? "capacity-too-small"
+          : "no-layer2-insertion-targets-missing";
+      }
+    }
     if (canArbitrate) {
       const focusAnchors = (focus: Focus) => {
         if (focus === "Legs") return ["squat", "hinge", "lunge"] as MovementPattern[];
@@ -813,6 +844,15 @@ export function chooseExercises(args: {
       const haveAnchors = anchors.every((p) => picked.some((ex) => ex.kind === "compound" && ex.movementPattern === p));
       const anchorSlotsCount = picked.filter((ex) => ex.kind === "compound" && anchors.includes(ex.movementPattern)).length;
       const hasRedundantStructuralSlots = haveAnchors && anchorSlotsCount > anchors.length;
+      if (arbitrationDebug) {
+        arbitrationDebug.anchors = anchors;
+        arbitrationDebug.haveAnchors = haveAnchors;
+        arbitrationDebug.anchorSlotsCount = anchorSlotsCount;
+        arbitrationDebug.hasRedundantStructuralSlots = hasRedundantStructuralSlots;
+        if (!hasRedundantStructuralSlots) {
+          arbitrationDebug.earlyExit = !haveAnchors ? "identity-not-saturated-missing-anchor" : "no-redundant-anchor-slots";
+        }
+      }
 
       if (hasRedundantStructuralSlots) {
         // Protect foundational identity anchors and any exercises that already satisfy explicit Layer 2 intent.
@@ -827,6 +867,13 @@ export function chooseExercises(args: {
 
         const patternCounts = new Map<MovementPattern, number>();
         for (const ex of picked) patternCounts.set(ex.movementPattern, (patternCounts.get(ex.movementPattern) ?? 0) + 1);
+        if (arbitrationDebug) {
+          arbitrationDebug.protectedIndices = [...protectedIndices].sort((a, b) => a - b);
+          arbitrationDebug.patternCounts = [...patternCounts.entries()].reduce<Record<string, number>>((acc, [k, v]) => {
+            acc[k] = v;
+            return acc;
+          }, {});
+        }
 
         const marginalKeepValue = (ex: ExerciseMeta, idx: number) => {
           // Lower keepValue = better replacement candidate.
@@ -850,6 +897,10 @@ export function chooseExercises(args: {
             bestKeep = keep;
             replaceIdx = i;
           }
+        }
+        if (arbitrationDebug) {
+          arbitrationDebug.chosenReplaceIdx = replaceIdx >= 0 ? replaceIdx : undefined;
+          arbitrationDebug.chosenReplaceExercise = replaceIdx >= 0 ? picked[replaceIdx]?.name : undefined;
         }
 
         if (replaceIdx >= 0) {
@@ -905,6 +956,7 @@ export function chooseExercises(args: {
 
           let bestCandidate: ExerciseMeta | null = null;
           let bestScore = -Infinity;
+          if (arbitrationDebug) arbitrationDebug.candidateScores = [];
 
           for (const target of layer2InsertionTargets) {
             const candidates = EXERCISES
@@ -912,6 +964,14 @@ export function chooseExercises(args: {
               .filter((ex) => exerciseMatchesEmphasisTarget(ex, target));
             for (const c of candidates) {
               const scoreEval = tryCandidate(c);
+              if (arbitrationDebug) {
+                arbitrationDebug.candidateScores!.push({
+                  target,
+                  candidate: c.name,
+                  score: scoreEval,
+                  reason: scoreEval === null ? "rejected-by-tryCandidate" : undefined,
+                });
+              }
               if (scoreEval === null) continue;
               if (
                 scoreEval > bestScore ||
@@ -923,7 +983,14 @@ export function chooseExercises(args: {
             }
           }
 
-          if (bestCandidate) picked[replaceIdx] = bestCandidate;
+          if (bestCandidate) {
+            picked[replaceIdx] = bestCandidate;
+            if (arbitrationDebug) arbitrationDebug.replacedWith = bestCandidate.name;
+          } else if (arbitrationDebug) {
+            arbitrationDebug.replacementFailed = "no-viable-layer2-candidate";
+          }
+        } else if (arbitrationDebug) {
+          arbitrationDebug.replacementFailed = "no-replaceable-slot-after-protection";
         }
       }
     }
@@ -934,7 +1001,7 @@ export function chooseExercises(args: {
   return {
     picked: ordered,
     ranked: lastSorted.slice(0, Math.max(args.maxExercises + 4, 8)),
-    debug: { scoring: lastDebugScoring, rejected },
+    debug: { scoring: lastDebugScoring, rejected, arbitration: arbitrationDebug ?? undefined },
   };
 }
 
