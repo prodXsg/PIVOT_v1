@@ -784,6 +784,151 @@ export function chooseExercises(args: {
     }
   }
 
+  // Post-selection marginal slot arbitration:
+  // If Layer 1 identity is already satisfied and a Layer 2 emphasis is still missing,
+  // replace a redundant low-marginal-utility structural slot with the best missing emphasis representation.
+  {
+    const emphasisTargetsNow = buildEmphasisTargets(args.emphasis, picked);
+    const missingNow = listMissingEmphasisTargets(emphasisTargetsNow, args.focus);
+    const layer2InsertionTargets = missingNow.filter((t) => {
+      if (t.kind === "rear-delt" || t.kind === "forearms") return true;
+      if (t.kind !== "muscle" || t.muscle === undefined) return false;
+      if (t.muscle === "core" || t.muscle === "calves") return true;
+      // Insertions like shoulders on Legs do not map onto that focus's structural boundary.
+      return !isMuscleStructuralForFocus(args.focus, t.muscle);
+    });
+
+    const canArbitrate = args.maxExercises >= 6 && layer2InsertionTargets.length > 0;
+    if (canArbitrate) {
+      const focusAnchors = (focus: Focus) => {
+        if (focus === "Legs") return ["squat", "hinge", "lunge"] as MovementPattern[];
+        if (focus === "Push") return ["horizontal-press", "vertical-press", "adduction"] as MovementPattern[];
+        if (focus === "Pull") return ["vertical-pull", "horizontal-pull"] as MovementPattern[];
+        if (focus === "Core") return ["core-stability"] as MovementPattern[];
+        return ["squat", "hinge", "horizontal-press", "horizontal-pull"] as MovementPattern[];
+      };
+
+      // Check whether Layer 1 structural identity is already saturated and redundant slots exist.
+      const anchors = focusAnchors(args.focus);
+      const haveAnchors = anchors.every((p) => picked.some((ex) => ex.kind === "compound" && ex.movementPattern === p));
+      const anchorSlotsCount = picked.filter((ex) => ex.kind === "compound" && anchors.includes(ex.movementPattern)).length;
+      const hasRedundantStructuralSlots = haveAnchors && anchorSlotsCount > anchors.length;
+
+      if (hasRedundantStructuralSlots) {
+        // Protect foundational identity anchors and any exercises that already satisfy explicit Layer 2 intent.
+        const protectedIndices = new Set<number>();
+        for (const anchorPattern of anchors) {
+          const idx = picked.findIndex((ex) => ex.kind === "compound" && ex.movementPattern === anchorPattern);
+          if (idx >= 0) protectedIndices.add(idx);
+        }
+        for (let i = 0; i < picked.length; i++) {
+          if (isDirectEmphasisExercise(picked[i], args.emphasis)) protectedIndices.add(i);
+        }
+
+        const patternCounts = new Map<MovementPattern, number>();
+        for (const ex of picked) patternCounts.set(ex.movementPattern, (patternCounts.get(ex.movementPattern) ?? 0) + 1);
+
+        const marginalKeepValue = (ex: ExerciseMeta, idx: number) => {
+          // Lower keepValue = better replacement candidate.
+          let keep = 100;
+          if (ex.kind === "accessory") keep -= 15;
+          if (!isMuscleStructuralForFocus(args.focus, ex.primaryMuscle)) keep -= 25;
+          const dup = (patternCounts.get(ex.movementPattern) ?? 0) - 1;
+          keep -= Math.max(0, dup) * 22; // diminishing returns for duplicated structural patterns
+          if (idx >= picked.length - 2) keep -= 8; // later structural redundancy is less marginal
+          if (idx < 2) keep += 10; // early identity slots are more valuable
+          return keep;
+        };
+
+        let replaceIdx = -1;
+        let bestKeep = Infinity;
+        for (let i = 0; i < picked.length; i++) {
+          if (protectedIndices.has(i)) continue;
+          const ex = picked[i];
+          const keep = marginalKeepValue(ex, i);
+          if (keep < bestKeep || (keep === bestKeep && ex.name.localeCompare(picked[replaceIdx]?.name ?? ""))) {
+            bestKeep = keep;
+            replaceIdx = i;
+          }
+        }
+
+        if (replaceIdx >= 0) {
+          const usedPatterns = new Set(picked.map((p) => p.movementPattern));
+          const tryCandidate = (candidate: ExerciseMeta) => {
+            const scoreEval = scoreExercise({
+              ...args,
+              ex: candidate,
+              recent: args.recentExercises,
+              usedPatterns,
+              equipmentContext: args.equipmentContext,
+              memory: args.memory,
+              emphasis: args.emphasis,
+              emphasisTargets: emphasisTargetsNow,
+            }).score;
+
+            if (scoreEval < 0) return null;
+            const candName = canonicalName(candidate.name);
+            if (picked.some((p, j) => j !== replaceIdx && canonicalName(p.name) === candName)) return null;
+
+            const dupPrimaryAfter = picked
+              .filter((p, j) => j !== replaceIdx)
+              .filter((p) => p.primaryMuscle === candidate.primaryMuscle).length;
+            if (dupPrimaryAfter >= 2) return null;
+
+            // Focus purity boundaries (semantic prevention of cross-domain leakage).
+            if (args.focus === "Push") {
+              const isPullCompound =
+                candidate.kind === "compound" &&
+                (candidate.movementPattern === "horizontal-pull" || candidate.movementPattern === "vertical-pull");
+              if (isPullCompound && !isDirectInsertionIntentExercise(candidate, args.focus, args.emphasis)) return null;
+            }
+            if (args.focus === "Pull") {
+              const isChestPushCompound =
+                candidate.kind === "compound" &&
+                (candidate.pivotTags.includes("chest-dominant-push") ||
+                  candidate.movementPattern === "horizontal-press" ||
+                  candidate.movementPattern === "adduction");
+              if (isChestPushCompound && !isDirectInsertionIntentExercise(candidate, args.focus, args.emphasis)) return null;
+            }
+            if (args.focus === "Legs") {
+              const isUnrelatedUpperCompound =
+                candidate.kind === "compound" &&
+                (candidate.movementPattern === "horizontal-press" ||
+                  candidate.movementPattern === "vertical-press" ||
+                  candidate.movementPattern === "horizontal-pull" ||
+                  candidate.movementPattern === "vertical-pull" ||
+                  candidate.movementPattern === "adduction");
+              if (isUnrelatedUpperCompound && !isDirectInsertionIntentExercise(candidate, args.focus, args.emphasis)) return null;
+            }
+            return scoreEval;
+          };
+
+          let bestCandidate: ExerciseMeta | null = null;
+          let bestScore = -Infinity;
+
+          for (const target of layer2InsertionTargets) {
+            const candidates = EXERCISES
+              .filter((ex) => !picked.some((p, j) => j !== replaceIdx && canonicalName(p.name) === canonicalName(ex.name)))
+              .filter((ex) => exerciseMatchesEmphasisTarget(ex, target));
+            for (const c of candidates) {
+              const scoreEval = tryCandidate(c);
+              if (scoreEval === null) continue;
+              if (
+                scoreEval > bestScore ||
+                (scoreEval === bestScore && c.name.localeCompare(bestCandidate?.name ?? "") < 0)
+              ) {
+                bestScore = scoreEval;
+                bestCandidate = c;
+              }
+            }
+          }
+
+          if (bestCandidate) picked[replaceIdx] = bestCandidate;
+        }
+      }
+    }
+  }
+
   const ordered = orderPickedCoachLike(picked, args.focus, args.emphasis);
 
   return {
