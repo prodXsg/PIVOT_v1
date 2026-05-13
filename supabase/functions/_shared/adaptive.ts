@@ -186,8 +186,59 @@ function isDirectEmphasisExercise(ex: ExerciseMeta, emphasis: ParsedEmphasis | n
   return false;
 }
 
+function hasPivotTag(ex: ExerciseMeta, tag: string): boolean {
+  return ex.pivotTags.includes(tag);
+}
+
+function isPerceptualForearmRepresentative(ex: ExerciseMeta): boolean {
+  return (
+    hasPivotTag(ex, "forearm-bias") ||
+    hasPivotTag(ex, "grip-bias") ||
+    hasPivotTag(ex, "forearm-intent") ||
+    hasPivotTag(ex, "forearm-representative") ||
+    hasPivotTag(ex, "grip-intent")
+  );
+}
+
+function isTechnicallyForearmRelated(ex: ExerciseMeta): boolean {
+  return ex.primaryMuscle === "biceps" && ex.movementPattern === "elbow-flexion" && !isPerceptualForearmRepresentative(ex);
+}
+
+function isChestIsolation(ex: ExerciseMeta): boolean {
+  return hasPivotTag(ex, "chest-isolation") || (ex.primaryMuscle === "chest" && ex.movementPattern === "adduction");
+}
+
+function isShoulderIsolation(ex: ExerciseMeta): boolean {
+  return hasPivotTag(ex, "shoulder-isolation") || ex.movementPattern === "abduction";
+}
+
+function isCoreDirect(ex: ExerciseMeta): boolean {
+  return (
+    ex.primaryMuscle === "core" ||
+    hasPivotTag(ex, "core-direct") ||
+    hasPivotTag(ex, "trunk-stability") ||
+    ex.movementPattern === "core-stability"
+  );
+}
+
+function isPosteriorChain(ex: ExerciseMeta): boolean {
+  return hasPivotTag(ex, "posterior-chain");
+}
+
+function isLatDominant(ex: ExerciseMeta): boolean {
+  return hasPivotTag(ex, "lat-dominant");
+}
+
+function isUpperBackDominant(ex: ExerciseMeta): boolean {
+  return hasPivotTag(ex, "upper-back-dominant") || hasPivotTag(ex, "upper-back");
+}
+
+function isDeltIsolation(ex: ExerciseMeta): boolean {
+  return hasPivotTag(ex, "delt-isolation");
+}
+
 function isForearmIntentExercise(ex: ExerciseMeta): boolean {
-  return ex.pivotTags.includes("forearm-bias") || ex.pivotTags.includes("grip-bias");
+  return isPerceptualForearmRepresentative(ex);
 }
 
 function isDirectEmphasisForOrdering(ex: ExerciseMeta, emphasis: ParsedEmphasis | null | undefined): boolean {
@@ -307,21 +358,21 @@ export const EXERCISES: ExerciseMeta[] = [
   { name: "Push-up Drop Set", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["bodyweight"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 180, fatigueCost: 5, pivotTags: ["time-crunch", "no-equipment", "chest-dominant-push"], kind: "accessory" },
   { name: "Seated Dumbbell Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "high", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["overhead", "shoulder-dominant-push"], kind: "compound" },
   { name: "Machine Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly", "overhead", "shoulder-dominant-push"], kind: "compound" },
-  { name: "Cable Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["cable"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["shoulder-friendly"], kind: "accessory" },
-  { name: "Dumbbell Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["no-cable"], kind: "accessory" },
+  { name: "Cable Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["cable"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["shoulder-friendly", "shoulder-isolation", "delt-isolation"], kind: "accessory" },
+  { name: "Dumbbell Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["no-cable", "shoulder-isolation", "delt-isolation"], kind: "accessory" },
   { name: "Triceps Rope Pushdown", primaryMuscle: "triceps", secondaryMuscles: [], movementPattern: "elbow-extension", equipment: ["cable"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["joint-friendly"], kind: "accessory" },
   { name: "Overhead Cable Triceps Extension", primaryMuscle: "triceps", secondaryMuscles: [], movementPattern: "elbow-extension", equipment: ["cable"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 240, fatigueCost: 4, pivotTags: ["overhead"], kind: "accessory" },
-  { name: "Pec Deck Fly", primaryMuscle: "chest", secondaryMuscles: ["shoulders"], movementPattern: "adduction", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["joint-friendly", "chest-dominant-push"], kind: "accessory" },
-  { name: "Lat Pulldown", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "vertical-pull", equipment: ["cable", "machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["no-pullup"], kind: "compound" },
-  { name: "Assisted Pull-Up", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "vertical-pull", equipment: ["machine"], unilateral: false, jointStress: "high", level: "intermediate", estimatedTimeSec: 360, fatigueCost: 7, pivotTags: ["pullup"], kind: "compound" },
-  { name: "Seated Cable Row", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "horizontal-pull", equipment: ["cable"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["stable"], kind: "compound" },
-  { name: "Chest-Supported Row", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "horizontal-pull", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 390, fatigueCost: 6, pivotTags: ["lower-back-friendly"], kind: "compound" },
-  { name: "One-Arm Dumbbell Row", primaryMuscle: "back", secondaryMuscles: ["biceps", "core"], movementPattern: "horizontal-pull", equipment: ["dumbbell", "bench"], unilateral: true, jointStress: "moderate", level: "beginner", estimatedTimeSec: 420, fatigueCost: 6, pivotTags: ["unilateral"], kind: "compound" },
-  { name: "Face Pull", primaryMuscle: "shoulders", secondaryMuscles: ["back"], movementPattern: "horizontal-pull", equipment: ["cable"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["rear-delt"], kind: "accessory" },
-  { name: "Reverse Pec Deck", primaryMuscle: "shoulders", secondaryMuscles: ["back"], movementPattern: "horizontal-pull", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["rear-delt"], kind: "accessory" },
-  { name: "Dumbbell Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms"], kind: "accessory" },
-  { name: "Cable Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["cable"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms"], kind: "accessory" },
-  { name: "Hammer Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms", "forearm-bias", "grip-bias"], kind: "accessory" },
+  { name: "Pec Deck Fly", primaryMuscle: "chest", secondaryMuscles: ["shoulders"], movementPattern: "adduction", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["joint-friendly", "chest-dominant-push", "chest-isolation"], kind: "accessory" },
+  { name: "Lat Pulldown", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "vertical-pull", equipment: ["cable", "machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["no-pullup", "lat-dominant"], kind: "compound" },
+  { name: "Assisted Pull-Up", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "vertical-pull", equipment: ["machine"], unilateral: false, jointStress: "high", level: "intermediate", estimatedTimeSec: 360, fatigueCost: 7, pivotTags: ["pullup", "lat-dominant"], kind: "compound" },
+  { name: "Seated Cable Row", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "horizontal-pull", equipment: ["cable"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["stable", "lat-dominant", "upper-back-dominant"], kind: "compound" },
+  { name: "Chest-Supported Row", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "horizontal-pull", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 390, fatigueCost: 6, pivotTags: ["lower-back-friendly", "lat-dominant", "upper-back-dominant"], kind: "compound" },
+  { name: "One-Arm Dumbbell Row", primaryMuscle: "back", secondaryMuscles: ["biceps", "core"], movementPattern: "horizontal-pull", equipment: ["dumbbell", "bench"], unilateral: true, jointStress: "moderate", level: "beginner", estimatedTimeSec: 420, fatigueCost: 6, pivotTags: ["unilateral", "upper-back-dominant"], kind: "compound" },
+  { name: "Face Pull", primaryMuscle: "shoulders", secondaryMuscles: ["back"], movementPattern: "horizontal-pull", equipment: ["cable"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["rear-delt", "upper-back-dominant"], kind: "accessory" },
+  { name: "Reverse Pec Deck", primaryMuscle: "shoulders", secondaryMuscles: ["back"], movementPattern: "horizontal-pull", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["rear-delt", "upper-back-dominant"], kind: "accessory" },
+  { name: "Dumbbell Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms", "biceps-technical"], kind: "accessory" },
+  { name: "Cable Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["cable"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms", "biceps-technical"], kind: "accessory" },
+  { name: "Hammer Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms", "forearm-bias", "grip-bias", "forearm-intent", "forearm-representative", "grip-intent"], kind: "accessory" },
   { name: "Goblet Squat", primaryMuscle: "quads", secondaryMuscles: ["glutes", "core"], movementPattern: "squat", equipment: ["dumbbell"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["no-rack", "quad-dominant-lower"], kind: "compound" },
   { name: "Leg Press", primaryMuscle: "quads", secondaryMuscles: ["glutes"], movementPattern: "squat", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["knee-load", "quad-dominant-lower"], kind: "compound" },
   { name: "Romanian Deadlift", primaryMuscle: "hamstrings", secondaryMuscles: ["glutes", "back"], movementPattern: "hinge", equipment: ["dumbbell", "barbell"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 420, fatigueCost: 8, pivotTags: ["posterior-chain", "hinge-dominant-lower"], kind: "compound" },
@@ -332,7 +383,7 @@ export const EXERCISES: ExerciseMeta[] = [
   { name: "Hip Thrust (Machine)", primaryMuscle: "glutes", secondaryMuscles: ["hamstrings"], movementPattern: "hinge", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 330, fatigueCost: 6, pivotTags: ["glute-focused", "posterior-chain", "hinge-dominant-lower"], kind: "compound" },
   { name: "Standing Calf Raise", primaryMuscle: "calves", secondaryMuscles: [], movementPattern: "carry", equipment: ["machine", "bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 2, pivotTags: ["calves"], kind: "accessory" },
   { name: "Seated Calf Raise", primaryMuscle: "calves", secondaryMuscles: [], movementPattern: "carry", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 2, pivotTags: ["calves"], kind: "accessory" },
-  { name: "Plank", primaryMuscle: "core", secondaryMuscles: [], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 150, fatigueCost: 2, pivotTags: ["core"], kind: "accessory" },
+  { name: "Plank", primaryMuscle: "core", secondaryMuscles: [], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 150, fatigueCost: 2, pivotTags: ["core", "core-direct", "trunk-stability"], kind: "accessory" },
 ];
 
 export function canonicalName(s: string): string {
@@ -463,13 +514,17 @@ export function scoreExercise(args: {
     // Layer-2 structural reinterpretation: emphasis biases how identity slots are filled (coach-like, perceptual).
     const shouldersEmphasis = emphasis.muscles.includes("shoulders");
     if (shouldersEmphasis && (focus === "Full Body" || focus === "Push")) {
-      if (ex.pivotTags.includes("chest-dominant-push")) {
-        score -= 10;
-        reasons.push("emphasis-shoulders-deprioritize-chest-push");
+      if (isShoulderIsolation(ex)) {
+        score += 10;
+        reasons.push("emphasis-shoulders-isolation-preference");
       }
       if (ex.pivotTags.includes("shoulder-dominant-push")) {
-        score += 11;
+        score += 8;
         reasons.push("emphasis-shoulders-prioritize-shoulder-push");
+      }
+      if (ex.pivotTags.includes("chest-dominant-push")) {
+        score -= 8;
+        reasons.push("emphasis-shoulders-deprioritize-chest-push");
       }
       if (ex.primaryMuscle === "shoulders" && ex.movementPattern === "abduction") {
         score += 7;
@@ -480,7 +535,7 @@ export function scoreExercise(args: {
     const hamEmphasis = emphasis.muscles.includes("hamstrings");
     const gluteEmphasis = emphasis.muscles.includes("glutes");
     if ((hamEmphasis || gluteEmphasis) && (focus === "Full Body" || focus === "Legs")) {
-      if (ex.pivotTags.includes("posterior-chain") || ex.pivotTags.includes("hinge-dominant-lower")) {
+      if (isPosteriorChain(ex) || ex.pivotTags.includes("hinge-dominant-lower")) {
         score += 9;
         reasons.push("emphasis-posterior-lower-priority");
       }
@@ -503,26 +558,54 @@ export function scoreExercise(args: {
     }
 
     if (emphasis.muscles.includes("chest")) {
-      if (ex.pivotTags.includes("chest-dominant-push")) {
+      if (isChestIsolation(ex)) {
+        score += 12;
+        reasons.push("emphasis-chest-isolation-priority");
+      } else if (ex.pivotTags.includes("chest-dominant-push")) {
         score += 8;
         reasons.push("emphasis-chest-semantic-priority");
-      } else if (ex.pivotTags.includes("shoulder-dominant-push")) {
-        score -= 5;
+      }
+      if (ex.pivotTags.includes("shoulder-dominant-push")) {
+        score -= 8;
         reasons.push("emphasis-chest-soft-shoulder-push-penalty");
       }
     }
 
-    if (
-      (focus === "Full Body" || focus === "Push") &&
-      !emphasis.muscles.includes("chest") &&
-      ex.pivotTags.includes("chest-dominant-push") &&
-      ex.kind === "compound"
-    ) {
-      score -= 6;
-      reasons.push("diversity-non-chest-emphasis-soft-penalty");
+    if (emphasis.muscles.includes("core")) {
+      if (isCoreDirect(ex)) {
+        score += 18;
+        reasons.push("emphasis-core-direct");
+      } else if (ex.secondaryMuscles.includes("core") && ex.primaryMuscle !== "core") {
+        score -= 6;
+        reasons.push("emphasis-core-avoid-incidental");
+      }
     }
 
-    // Explicit Layer 2 muscle not mapped onto Layer 1 (e.g. shoulders on Legs): perceptual priority for insertion.
+    if (emphasis.muscles.includes("back")) {
+      if (isLatDominant(ex)) {
+        score += 8;
+        reasons.push("emphasis-back-lat-priority");
+      }
+      if (isUpperBackDominant(ex)) {
+        score += 8;
+        reasons.push("emphasis-back-upper-back-priority");
+      }
+    }
+
+    if (emphasis.forearmsBoost) {
+      if (isPerceptualForearmRepresentative(ex)) {
+        score += 20;
+        reasons.push("emphasis-forearms-representative");
+      } else if (isTechnicallyForearmRelated(ex)) {
+        score += 4;
+        reasons.push("emphasis-forearms-technical-fallback");
+      }
+      if (ex.primaryMuscle === "biceps" && ex.movementPattern === "elbow-flexion" && !isPerceptualForearmRepresentative(ex)) {
+        score -= 8;
+        reasons.push("emphasis-forearms-deprioritize-generic-curl");
+      }
+    }
+
     if (
       emphasis.muscles.some((m) => m === ex.primaryMuscle && !isMuscleStructuralForFocus(focus, m))
     ) {
