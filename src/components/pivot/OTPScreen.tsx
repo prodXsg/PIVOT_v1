@@ -9,9 +9,11 @@ const RESEND_COOLDOWN = 30;
 export function OTPScreen({
   email,
   onVerified,
+  isExistingUser = false,
 }: {
   email: string;
   onVerified: () => void;
+  isExistingUser?: boolean;
 }) {
   const { setUserProfile } = useApp();
   const [digits, setDigits] = useState<string[]>(Array(DIGIT_COUNT).fill(""));
@@ -134,7 +136,7 @@ export function OTPScreen({
             color: "hsl(var(--foreground))",
           }}
         >
-          Almost there 💪
+          {isExistingUser ? "Welcome back" : "Verify your account"}
         </h1>
         <p
           className="mt-2"
@@ -145,11 +147,11 @@ export function OTPScreen({
             color: "hsl(var(--foreground)/0.55)",
           }}
         >
-          We sent a quick code to{" "}
+          We sent a verification code to{" "}
           <span style={{ color: "hsl(var(--foreground)/0.85)", fontWeight: 500 }}>
             {maskedEmail}
           </span>{" "}
-          — enter it below and you're in.
+          — {isExistingUser ? "enter it to continue your training." : "enter it to access your adaptive training."}
         </p>
       </div>
 
@@ -219,7 +221,7 @@ export function OTPScreen({
             animation: "otp-rise 320ms 160ms ease-out both",
           }}
         >
-          Your personalized training experience is ready.
+          {isExistingUser ? "Your adaptive training awaits." : "Your intelligent training system awaits."}
         </p>
       )}
 

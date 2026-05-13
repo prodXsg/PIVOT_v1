@@ -3,20 +3,40 @@ import { useState } from "react";
 export function AuthScreen({
   onCreateAccount,
   onExistingUser,
+  onEmailExists,
 }: {
   onCreateAccount: () => void;
   onExistingUser: (email: string) => void;
+  onEmailExists: (email: string) => void;
 }) {
   const [email, setEmail] = useState("");
   const [emailTouched, setEmailTouched] = useState(false);
+  const [checkingEmail, setCheckingEmail] = useState(false);
 
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  // Improved email validation: stricter regex, rejects obvious invalid TLDs
+  const emailValid = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/.test(email.trim()) &&
+    /\.[a-zA-Z]{2,}$/.test(email.trim()) && !/\.(tom|vom|test|example|invalid)$/i.test(email.trim());
   const showError = emailTouched && email.trim().length > 0 && !emailValid;
 
-  const handleContinue = (e: React.FormEvent) => {
+  const handleContinue = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!emailValid) { setEmailTouched(true); return; }
-    onExistingUser(email.trim());
+    setCheckingEmail(true);
+    // Simulate checking if email exists (replace with actual API call)
+    try {
+      // Mock check: assume email exists if it ends with @existing.com
+      const exists = email.trim().toLowerCase().endsWith('@existing.com');
+      if (exists) {
+        onEmailExists(email.trim());
+      } else {
+        onExistingUser(email.trim());
+      }
+    } catch (error) {
+      // Handle error
+      onExistingUser(email.trim());
+    } finally {
+      setCheckingEmail(false);
+    }
   };
 
   return (
@@ -46,7 +66,7 @@ export function AuthScreen({
       </div>
 
       {/* Value-first headline */}
-      <div className="mt-8 text-center" style={{ animation: "auth-rise 320ms 80ms ease-out both" }}>
+      <div className="mt-6 text-center" style={{ animation: "auth-rise 320ms 80ms ease-out both" }}>
         <h1
           style={{
             fontSize: 26,
@@ -56,7 +76,7 @@ export function AuthScreen({
             color: "hsl(var(--foreground))",
           }}
         >
-          Your adaptive training companion.
+          Intelligent training that adapts to you.
         </h1>
         <p
           className="mt-2"
@@ -67,14 +87,12 @@ export function AuthScreen({
             lineHeight: 1.5,
           }}
         >
-          Workouts that adapt to your reality.
+          Recovery-aware workouts, personalized to your daily state.
         </p>
       </div>
 
-      <div className="flex-1" />
-
       {/* Primary CTA */}
-      <div style={{ animation: "auth-rise 320ms 140ms ease-out both" }}>
+      <div className="mt-8" style={{ animation: "auth-rise 320ms 140ms ease-out both" }}>
         <button
           type="button"
           onClick={onCreateAccount}
@@ -91,12 +109,12 @@ export function AuthScreen({
             cursor: "pointer",
           }}
         >
-          Create an Account
+          Get Started
         </button>
       </div>
 
       {/* Divider */}
-      <div className="flex items-center gap-3 my-5" style={{ animation: "auth-rise 320ms 180ms ease-out both" }}>
+      <div className="flex items-center gap-3 my-6" style={{ animation: "auth-rise 320ms 180ms ease-out both" }}>
         <div className="flex-1 h-px bg-[hsl(var(--foreground)/0.12)]" />
         <span style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--foreground)/0.35)", letterSpacing: "0.5px" }}>
           OR
@@ -107,7 +125,7 @@ export function AuthScreen({
       {/* Existing user — email */}
       <div style={{ animation: "auth-rise 320ms 220ms ease-out both" }}>
         <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground)/0.55)", marginBottom: 8 }}>
-          Already have an account?
+          Returning user?
         </p>
         <form onSubmit={handleContinue} noValidate>
           <input
@@ -117,6 +135,7 @@ export function AuthScreen({
             value={email}
             onChange={(e) => { setEmail(e.target.value); setEmailTouched(false); }}
             onBlur={() => setEmailTouched(true)}
+            disabled={checkingEmail}
             style={{
               width: "100%",
               height: 50,
@@ -129,38 +148,36 @@ export function AuthScreen({
               fontWeight: 400,
               color: "hsl(var(--foreground))",
               outline: "none",
-              marginBottom: showError ? 6 : 10,
+              marginBottom: showError ? 6 : 12,
               transition: "border-color 150ms ease-out",
               boxSizing: "border-box",
             }}
           />
           {showError && (
             <p style={{ fontSize: 12, color: "#ff5a5a", marginBottom: 8 }}>
-              Enter a valid email address.
+              Please enter a valid email address.
             </p>
           )}
           <button
             type="submit"
-            disabled={!email.trim()}
+            disabled={!email.trim() || checkingEmail}
             style={{
               width: "100%",
               height: 50,
               borderRadius: 14,
               background: "transparent",
-              border: `1.5px solid ${email.trim() ? "hsl(var(--foreground)/0.25)" : "hsl(var(--foreground)/0.10)"}`,
+              border: `1.5px solid ${email.trim() && !checkingEmail ? "hsl(var(--foreground)/0.25)" : "hsl(var(--foreground)/0.10)"}`,
               fontSize: 15,
               fontWeight: 600,
-              color: email.trim() ? "hsl(var(--foreground))" : "hsl(var(--foreground)/0.3)",
-              cursor: email.trim() ? "pointer" : "default",
+              color: email.trim() && !checkingEmail ? "hsl(var(--foreground))" : "hsl(var(--foreground)/0.3)",
+              cursor: email.trim() && !checkingEmail ? "pointer" : "default",
               transition: "border-color 150ms ease-out, color 150ms ease-out",
             }}
           >
-            Continue →
+            {checkingEmail ? "Checking..." : "Continue →"}
           </button>
         </form>
       </div>
-
-      <div style={{ height: 8 }} />
 
       <style>{`
         @keyframes auth-fade { from { opacity: 0; } to { opacity: 1; } }

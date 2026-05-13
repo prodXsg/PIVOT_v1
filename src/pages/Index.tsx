@@ -16,7 +16,7 @@ import { AccountCreationScreen } from "@/components/pivot/AccountCreationScreen"
 import { OTPScreen } from "@/components/pivot/OTPScreen";
 import { toast } from "sonner";
 
-type AppFlow = "hero" | "how-it-works" | "auth" | "account-creation" | "otp" | "app";
+type AppFlow = "hero" | "how-it-works" | "auth" | "account-creation" | "existing-user" | "otp" | "app";
 type HomeFlow = "home" | "checkin" | "checkin-intent" | "workout" | "workout-preview";
 
 function getInitialAppFlow(): AppFlow {
@@ -62,6 +62,7 @@ function PivotApp() {
   const [homeFlow, setHomeFlow] = useState<HomeFlow>(getInitialHomeFlow);
   const [readinessDraft, setReadinessDraft] = useState<ReadinessSnapshot | null>(null);
   const [otpEmail, setOtpEmail] = useState("");
+  const [isExistingUser, setIsExistingUser] = useState(false);
 
   const sliderLabel: "Get Started" | "I'm Back" | "Continue Workout" =
     workoutState === "WORKOUT_STARTED"
@@ -156,6 +157,15 @@ function PivotApp() {
           onCreateAccount={() => setAppFlow("account-creation")}
           onExistingUser={(email) => {
             setOtpEmail(email);
+            setIsExistingUser(false);
+            try {
+              localStorage.setItem("pivot_pending_user", JSON.stringify({ name: "", email }));
+            } catch {}
+            setAppFlow("otp");
+          }}
+          onEmailExists={(email) => {
+            setOtpEmail(email);
+            setIsExistingUser(true);
             try {
               localStorage.setItem("pivot_pending_user", JSON.stringify({ name: "", email }));
             } catch {}
@@ -182,7 +192,7 @@ function PivotApp() {
   if (appFlow === "otp") {
     return (
       <MobileFrame>
-        <OTPScreen email={otpEmail} onVerified={() => setAppFlow("app")} />
+        <OTPScreen email={otpEmail} onVerified={() => setAppFlow("app")} isExistingUser={isExistingUser} />
       </MobileFrame>
     );
   }

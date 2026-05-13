@@ -7,18 +7,18 @@ type Step = 1 | 2;
 const HOW_IT_WORKS = [
   {
     Icon: Clock,
-    title: "Check in daily",
-    body: "Tell Pivot how you slept, your energy, soreness, and how much time you have.",
+    title: "Daily check-in",
+    body: "Share your sleep, energy, soreness, and time. Pivot analyzes your state in real-time.",
   },
   {
     Icon: Dumbbell,
-    title: "Get your workout",
-    body: "AI generates a plan that fits your exact state today. Not yesterday. Today.",
+    title: "Adaptive workouts",
+    body: "AI generates personalized plans that match your recovery and goals, not yesterday's assumptions.",
   },
   {
     Icon: RefreshCw,
-    title: "Adapt on the fly",
-    body: "Tap any exercise to swap it out around real-life constraints.",
+    title: "Live adjustments",
+    body: "Swap exercises on the fly around equipment, preferences, or how you're feeling today.",
   },
 ];
 
@@ -97,9 +97,9 @@ function Step1({ onContinue }: { onContinue: () => void }) {
             color: "hsl(var(--foreground))",
           }}
         >
-          Built for real life,
+          Training that
           <br />
-          not perfect conditions.
+          understands you.
         </h2>
       </div>
 
@@ -224,9 +224,9 @@ function Step2({
             color: "hsl(var(--foreground))",
           }}
         >
-          What should we
+          Personalize
           <br />
-          call you?
+          your experience.
         </h2>
       </div>
 
@@ -300,7 +300,7 @@ function Step2({
             transition: "background 200ms ease-out, color 200ms ease-out",
           }}
         >
-          Let's go
+          Let's adapt
         </button>
       </div>
     </form>
