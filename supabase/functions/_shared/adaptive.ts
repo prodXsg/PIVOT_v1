@@ -110,24 +110,60 @@ function buildEmphasisTargets(emphasis: ParsedEmphasis | null | undefined, picke
     if (!picked.some((p) => p.primaryMuscle === m)) uncoveredMuscles.add(m);
   }
   const needRearDeltTag = !!(emphasis.rearDeltBoost && !picked.some((p) => p.pivotTags.includes("rear-delt")));
-  const needForearmFlex = !!(emphasis.forearmsBoost && !picked.some((p) => p.movementPattern === "elbow-flexion"));
+  const needForearmFlex = !!(emphasis.forearmsBoost && !picked.some((p) => isForearmIntentExercise(p)));
   if (!uncoveredMuscles.size && !needRearDeltTag && !needForearmFlex) return null;
   return { uncoveredMuscles, needRearDeltTag, needForearmFlex };
 }
 
-function listMissingEmphasisTargets(emphasisTargets: EmphasisScoringTargets | null | undefined): EmphasisGuaranteeTarget[] {
+/** Explicit user intents that must stay visible under compression (minimum representation guarantees). */
+function countCrossDomainExplicitSelections(emphasis: ParsedEmphasis | null | undefined): number {
+  if (!emphasis) return 0;
+  let n = 0;
+  if (emphasis.muscles.includes("core")) n++;
+  if (emphasis.muscles.includes("calves")) n++;
+  if (emphasis.rearDeltBoost) n++;
+  if (emphasis.forearmsBoost) n++;
+  return n;
+}
+
+/**
+ * Missing guarantee targets ordered for graceful degradation:
+ * core → calves → rear delts → forearms → insertion-required muscles (e.g. shoulders on Legs) → structural-fit emphasis (hamstrings on Legs).
+ */
+function listMissingEmphasisTargets(
+  emphasisTargets: EmphasisScoringTargets | null | undefined,
+  focus: Focus,
+): EmphasisGuaranteeTarget[] {
   if (!emphasisTargets) return [];
-  const out: EmphasisGuaranteeTarget[] = [];
-  for (const m of emphasisTargets.uncoveredMuscles) out.push({ kind: "muscle", muscle: m });
-  if (emphasisTargets.needRearDeltTag) out.push({ kind: "rear-delt" });
-  if (emphasisTargets.needForearmFlex) out.push({ kind: "forearms" });
-  return out;
+  const muscleTargets: EmphasisGuaranteeTarget[] = [];
+  for (const m of emphasisTargets.uncoveredMuscles) {
+    muscleTargets.push({ kind: "muscle", muscle: m });
+  }
+  const crossMuscles = muscleTargets.filter((t) => t.kind === "muscle" && (t.muscle === "core" || t.muscle === "calves"));
+  const structuralMuscles = muscleTargets.filter((t) => t.kind === "muscle" && t.muscle !== "core" && t.muscle !== "calves");
+  crossMuscles.sort((a, b) => {
+    const rank = (m: Muscle | undefined) => (m === "core" ? 0 : m === "calves" ? 1 : 9);
+    return rank(a.muscle) - rank(b.muscle) || String(a.muscle).localeCompare(String(b.muscle));
+  });
+
+  const insertionMuscles = structuralMuscles.filter(
+    (t) => t.kind === "muscle" && t.muscle !== undefined && !isMuscleStructuralForFocus(focus, t.muscle),
+  );
+  const structuralFitMuscles = structuralMuscles.filter(
+    (t) => t.kind === "muscle" && t.muscle !== undefined && isMuscleStructuralForFocus(focus, t.muscle),
+  );
+
+  const specials: EmphasisGuaranteeTarget[] = [];
+  if (emphasisTargets.needRearDeltTag) specials.push({ kind: "rear-delt" });
+  if (emphasisTargets.needForearmFlex) specials.push({ kind: "forearms" });
+
+  return [...crossMuscles, ...specials, ...insertionMuscles, ...structuralFitMuscles];
 }
 
 function exerciseMatchesEmphasisTarget(ex: ExerciseMeta, target: EmphasisGuaranteeTarget): boolean {
   if (target.kind === "muscle") return target.muscle === ex.primaryMuscle;
   if (target.kind === "rear-delt") return ex.pivotTags.includes("rear-delt");
-  return ex.movementPattern === "elbow-flexion";
+  return isForearmIntentExercise(ex);
 }
 
 function exerciseMatchesAnyEmphasisTarget(ex: ExerciseMeta, targets: EmphasisGuaranteeTarget[]): boolean {
@@ -146,22 +182,95 @@ function isDirectEmphasisExercise(ex: ExerciseMeta, emphasis: ParsedEmphasis | n
   if (!emphasis) return false;
   if (emphasis.muscles.includes(ex.primaryMuscle)) return true;
   if (emphasis.rearDeltBoost && ex.pivotTags.includes("rear-delt")) return true;
-  if (emphasis.forearmsBoost && ex.movementPattern === "elbow-flexion") return true;
+  if (emphasis.forearmsBoost && isForearmIntentExercise(ex)) return true;
   return false;
 }
 
-function orderPickedForEmphasis(picked: ExerciseMeta[], emphasis: ParsedEmphasis | null | undefined): ExerciseMeta[] {
-  if (!emphasis || (!emphasis.muscles.length && !emphasis.rearDeltBoost && !emphasis.forearmsBoost)) return picked;
-  const muscleSet = new Set(emphasis.muscles);
-  const isDirect = (ex: ExerciseMeta): boolean => {
-    if (muscleSet.has(ex.primaryMuscle)) return true;
-    if (emphasis.rearDeltBoost && ex.pivotTags.includes("rear-delt")) return true;
-    if (emphasis.forearmsBoost && ex.movementPattern === "elbow-flexion") return true;
-    return false;
+function isForearmIntentExercise(ex: ExerciseMeta): boolean {
+  return ex.pivotTags.includes("forearm-bias") || ex.pivotTags.includes("grip-bias");
+}
+
+function isDirectEmphasisForOrdering(ex: ExerciseMeta, emphasis: ParsedEmphasis | null | undefined): boolean {
+  return isDirectEmphasisExercise(ex, emphasis);
+}
+
+/** Coach-like flow: lower compounds → upper push compounds → upper pull compounds → accessories (emphasis-first, then easier finishers). */
+function orderPickedCoachLike(
+  picked: ExerciseMeta[],
+  focus: Focus,
+  emphasis: ParsedEmphasis | null | undefined,
+): ExerciseMeta[] {
+  const posteriorLowerBias =
+    !!emphasis &&
+    (emphasis.muscles.includes("hamstrings") || emphasis.muscles.includes("glutes"));
+
+  const isLowerCompound = (ex: ExerciseMeta) =>
+    ex.kind === "compound" && (ex.movementPattern === "squat" || ex.movementPattern === "hinge" || ex.movementPattern === "lunge");
+  const isUpperPushCompound = (ex: ExerciseMeta) =>
+    ex.kind === "compound" &&
+    (ex.movementPattern === "horizontal-press" || ex.movementPattern === "vertical-press" || ex.movementPattern === "adduction");
+  const isUpperPullCompound = (ex: ExerciseMeta) =>
+    ex.kind === "compound" &&
+    (ex.movementPattern === "vertical-pull" || ex.movementPattern === "horizontal-pull");
+
+  const lowerC = picked.filter(isLowerCompound);
+  const upperPushC = picked.filter(isUpperPushCompound);
+  const upperPullC = picked.filter(isUpperPullCompound);
+  const accessory = picked.filter(
+    (ex) => !isLowerCompound(ex) && !isUpperPushCompound(ex) && !isUpperPullCompound(ex),
+  );
+
+  const hingeFirst = (a: ExerciseMeta, b: ExerciseMeta) => {
+    const rank = (ex: ExerciseMeta) => {
+      if (ex.movementPattern === "hinge") return posteriorLowerBias ? 0 : 1;
+      if (ex.movementPattern === "squat") return posteriorLowerBias ? 1 : 0;
+      return 2; // lunge
+    };
+    const d = rank(a) - rank(b);
+    if (d !== 0) return d;
+    return b.fatigueCost - a.fatigueCost || a.name.localeCompare(b.name);
   };
-  const direct = picked.filter(isDirect);
-  const rest = picked.filter((e) => !isDirect(e));
-  return [...direct, ...rest];
+
+  const heavyCompoundFirst = (a: ExerciseMeta, b: ExerciseMeta) =>
+    b.fatigueCost - a.fatigueCost || a.name.localeCompare(b.name);
+
+  const accessorySort = (a: ExerciseMeta, b: ExerciseMeta) => {
+    const da = isDirectEmphasisForOrdering(a, emphasis) ? 0 : 1;
+    const db = isDirectEmphasisForOrdering(b, emphasis) ? 0 : 1;
+    if (da !== db) return da - db;
+    // Core / calves often feel better as session finishers (low fatigue, local).
+    const finisher = (ex: ExerciseMeta) =>
+      ex.primaryMuscle === "core" || ex.primaryMuscle === "calves" ? 1 : 0;
+    const fa = finisher(a);
+    const fb = finisher(b);
+    if (fa !== fb) return fa - fb;
+    return a.fatigueCost - b.fatigueCost || a.name.localeCompare(b.name);
+  };
+
+  lowerC.sort(hingeFirst);
+  upperPushC.sort(heavyCompoundFirst);
+  upperPullC.sort(heavyCompoundFirst);
+  accessory.sort(accessorySort);
+
+  // Full Body: classic flow lower → push → pull → accessories; other focuses keep relative compound blocks then accessories.
+  if (focus === "Full Body") {
+    return [...lowerC, ...upperPushC, ...upperPullC, ...accessory];
+  }
+  if (focus === "Legs") {
+    return [...lowerC, ...accessory];
+  }
+  if (focus === "Push") {
+    return [...upperPushC, ...accessory];
+  }
+  if (focus === "Pull") {
+    return [...upperPullC, ...accessory];
+  }
+  // Default: compounds first (lower if any), then mixed accessories.
+  const compounds = picked.filter((ex) => ex.kind === "compound");
+  const acc = picked.filter((ex) => ex.kind !== "compound");
+  compounds.sort(heavyCompoundFirst);
+  acc.sort(accessorySort);
+  return [...compounds, ...acc];
 }
 
 /** Maps client `focusEmphasis` ids to deterministic scoring hints. Unknown ids are ignored. */
@@ -192,17 +301,17 @@ export function parseFocusEmphasis(raw: unknown): ParsedEmphasis {
 }
 
 export const EXERCISES: ExerciseMeta[] = [
-  { name: "Dumbbell Bench Press", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 420, fatigueCost: 7, pivotTags: ["no-barbell", "bench-required"], kind: "compound" },
-  { name: "Machine Chest Press", primaryMuscle: "chest", secondaryMuscles: ["triceps"], movementPattern: "horizontal-press", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly"], kind: "compound" },
-  { name: "Incline Dumbbell Press", primaryMuscle: "chest", secondaryMuscles: ["shoulders", "triceps"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["bench-required"], kind: "compound" },
-  { name: "Push-up Drop Set", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["bodyweight"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 180, fatigueCost: 5, pivotTags: ["time-crunch", "no-equipment"], kind: "accessory" },
-  { name: "Seated Dumbbell Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "high", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["overhead"], kind: "compound" },
-  { name: "Machine Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly", "overhead"], kind: "compound" },
+  { name: "Dumbbell Bench Press", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 420, fatigueCost: 7, pivotTags: ["no-barbell", "bench-required", "chest-dominant-push"], kind: "compound" },
+  { name: "Machine Chest Press", primaryMuscle: "chest", secondaryMuscles: ["triceps"], movementPattern: "horizontal-press", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly", "chest-dominant-push"], kind: "compound" },
+  { name: "Incline Dumbbell Press", primaryMuscle: "chest", secondaryMuscles: ["shoulders", "triceps"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["bench-required", "chest-dominant-push"], kind: "compound" },
+  { name: "Push-up Drop Set", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["bodyweight"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 180, fatigueCost: 5, pivotTags: ["time-crunch", "no-equipment", "chest-dominant-push"], kind: "accessory" },
+  { name: "Seated Dumbbell Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "high", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["overhead", "shoulder-dominant-push"], kind: "compound" },
+  { name: "Machine Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly", "overhead", "shoulder-dominant-push"], kind: "compound" },
   { name: "Cable Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["cable"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["shoulder-friendly"], kind: "accessory" },
   { name: "Dumbbell Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["no-cable"], kind: "accessory" },
   { name: "Triceps Rope Pushdown", primaryMuscle: "triceps", secondaryMuscles: [], movementPattern: "elbow-extension", equipment: ["cable"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["joint-friendly"], kind: "accessory" },
   { name: "Overhead Cable Triceps Extension", primaryMuscle: "triceps", secondaryMuscles: [], movementPattern: "elbow-extension", equipment: ["cable"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 240, fatigueCost: 4, pivotTags: ["overhead"], kind: "accessory" },
-  { name: "Pec Deck Fly", primaryMuscle: "chest", secondaryMuscles: ["shoulders"], movementPattern: "adduction", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["joint-friendly"], kind: "accessory" },
+  { name: "Pec Deck Fly", primaryMuscle: "chest", secondaryMuscles: ["shoulders"], movementPattern: "adduction", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["joint-friendly", "chest-dominant-push"], kind: "accessory" },
   { name: "Lat Pulldown", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "vertical-pull", equipment: ["cable", "machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["no-pullup"], kind: "compound" },
   { name: "Assisted Pull-Up", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "vertical-pull", equipment: ["machine"], unilateral: false, jointStress: "high", level: "intermediate", estimatedTimeSec: 360, fatigueCost: 7, pivotTags: ["pullup"], kind: "compound" },
   { name: "Seated Cable Row", primaryMuscle: "back", secondaryMuscles: ["biceps"], movementPattern: "horizontal-pull", equipment: ["cable"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["stable"], kind: "compound" },
@@ -212,15 +321,15 @@ export const EXERCISES: ExerciseMeta[] = [
   { name: "Reverse Pec Deck", primaryMuscle: "shoulders", secondaryMuscles: ["back"], movementPattern: "horizontal-pull", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["rear-delt"], kind: "accessory" },
   { name: "Dumbbell Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms"], kind: "accessory" },
   { name: "Cable Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["cable"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms"], kind: "accessory" },
-  { name: "Hammer Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms"], kind: "accessory" },
-  { name: "Goblet Squat", primaryMuscle: "quads", secondaryMuscles: ["glutes", "core"], movementPattern: "squat", equipment: ["dumbbell"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["no-rack"], kind: "compound" },
-  { name: "Leg Press", primaryMuscle: "quads", secondaryMuscles: ["glutes"], movementPattern: "squat", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["knee-load"], kind: "compound" },
-  { name: "Romanian Deadlift", primaryMuscle: "hamstrings", secondaryMuscles: ["glutes", "back"], movementPattern: "hinge", equipment: ["dumbbell", "barbell"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 420, fatigueCost: 8, pivotTags: ["posterior-chain"], kind: "compound" },
+  { name: "Hammer Curl", primaryMuscle: "biceps", secondaryMuscles: [], movementPattern: "elbow-flexion", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 210, fatigueCost: 3, pivotTags: ["arms", "forearm-bias", "grip-bias"], kind: "accessory" },
+  { name: "Goblet Squat", primaryMuscle: "quads", secondaryMuscles: ["glutes", "core"], movementPattern: "squat", equipment: ["dumbbell"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["no-rack", "quad-dominant-lower"], kind: "compound" },
+  { name: "Leg Press", primaryMuscle: "quads", secondaryMuscles: ["glutes"], movementPattern: "squat", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["knee-load", "quad-dominant-lower"], kind: "compound" },
+  { name: "Romanian Deadlift", primaryMuscle: "hamstrings", secondaryMuscles: ["glutes", "back"], movementPattern: "hinge", equipment: ["dumbbell", "barbell"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 420, fatigueCost: 8, pivotTags: ["posterior-chain", "hinge-dominant-lower"], kind: "compound" },
   { name: "Seated Leg Curl", primaryMuscle: "hamstrings", secondaryMuscles: [], movementPattern: "hinge", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 4, pivotTags: ["joint-friendly"], kind: "accessory" },
-  { name: "Leg Extension", primaryMuscle: "quads", secondaryMuscles: [], movementPattern: "squat", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 240, fatigueCost: 4, pivotTags: ["joint-friendly"], kind: "accessory" },
+  { name: "Leg Extension", primaryMuscle: "quads", secondaryMuscles: [], movementPattern: "squat", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 240, fatigueCost: 4, pivotTags: ["joint-friendly", "quad-dominant-lower"], kind: "accessory" },
   { name: "Walking Lunges", primaryMuscle: "glutes", secondaryMuscles: ["quads", "hamstrings"], movementPattern: "lunge", equipment: ["dumbbell", "bodyweight"], unilateral: true, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["unilateral"], kind: "compound" },
   { name: "Split Squat", primaryMuscle: "glutes", secondaryMuscles: ["quads"], movementPattern: "lunge", equipment: ["dumbbell", "bodyweight"], unilateral: true, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["unilateral"], kind: "compound" },
-  { name: "Hip Thrust (Machine)", primaryMuscle: "glutes", secondaryMuscles: ["hamstrings"], movementPattern: "hinge", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 330, fatigueCost: 6, pivotTags: ["glute-focused"], kind: "compound" },
+  { name: "Hip Thrust (Machine)", primaryMuscle: "glutes", secondaryMuscles: ["hamstrings"], movementPattern: "hinge", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 330, fatigueCost: 6, pivotTags: ["glute-focused", "posterior-chain", "hinge-dominant-lower"], kind: "compound" },
   { name: "Standing Calf Raise", primaryMuscle: "calves", secondaryMuscles: [], movementPattern: "carry", equipment: ["machine", "bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 2, pivotTags: ["calves"], kind: "accessory" },
   { name: "Seated Calf Raise", primaryMuscle: "calves", secondaryMuscles: [], movementPattern: "carry", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 2, pivotTags: ["calves"], kind: "accessory" },
   { name: "Plank", primaryMuscle: "core", secondaryMuscles: [], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 150, fatigueCost: 2, pivotTags: ["core"], kind: "accessory" },
@@ -260,6 +369,34 @@ const FOCUS_RULES: Record<Focus, FocusRule> = {
   Arms: { primary: ["biceps", "triceps"], secondary: ["shoulders"], priorityPatterns: ["elbow-flexion", "elbow-extension"] },
   "Rear Delts": { primary: ["shoulders"], secondary: ["back"], priorityPatterns: ["horizontal-pull", "abduction"] },
 };
+
+/** Whether this muscle maps onto Layer 1 primary/secondary for the session focus (reshapes existing slots). */
+function isMuscleStructuralForFocus(focus: Focus, muscle: Muscle): boolean {
+  const rule = FOCUS_RULES[focus];
+  return rule.primary.includes(muscle) || rule.secondary.includes(muscle);
+}
+
+function isDirectInsertionIntentExercise(ex: ExerciseMeta, focus: Focus, emphasis: ParsedEmphasis | null | undefined): boolean {
+  if (!emphasis) return false;
+  if (emphasis.forearmsBoost && isForearmIntentExercise(ex) && !isMuscleStructuralForFocus(focus, "biceps")) return true;
+  if (emphasis.rearDeltBoost && ex.pivotTags.includes("rear-delt") && !isMuscleStructuralForFocus(focus, "shoulders")) return true;
+  return emphasis.muscles.some((m) => m === ex.primaryMuscle && !isMuscleStructuralForFocus(focus, m));
+}
+
+/** Explicit emphasis muscles that require structural insertion (e.g. shoulders on Legs — not parasitic on lower slots). */
+function countInsertionIntentEmphasis(emphasis: ParsedEmphasis | null | undefined, focus: Focus): number {
+  if (!emphasis) return 0;
+  return emphasis.muscles.filter((m) => !isMuscleStructuralForFocus(focus, m)).length;
+}
+
+/**
+ * Minimum direct-emphasis picks so Layer 2 stays visibly intentional:
+ * cross-domain bundle (core/calves/rear/forearms) + insertion-required muscles (non-structural for focus).
+ */
+function countLayer2VisibilityFloor(emphasis: ParsedEmphasis | null | undefined, focus: Focus): number {
+  if (!emphasis) return 0;
+  return countCrossDomainExplicitSelections(emphasis) + countInsertionIntentEmphasis(emphasis, focus);
+}
 
 function allowedByEquipment(ex: ExerciseMeta, equipmentContext: string): boolean {
   const e = equipmentContext.toLowerCase();
@@ -323,6 +460,76 @@ export function scoreExercise(args: {
   if (pain > 0 && ex.jointStress !== "low") { const v = Math.min(6, pain * 0.7); score -= v; reasons.push("pain-memory-penalty"); }
 
   if (emphasis) {
+    // Layer-2 structural reinterpretation: emphasis biases how identity slots are filled (coach-like, perceptual).
+    const shouldersEmphasis = emphasis.muscles.includes("shoulders");
+    if (shouldersEmphasis && (focus === "Full Body" || focus === "Push")) {
+      if (ex.pivotTags.includes("chest-dominant-push")) {
+        score -= 10;
+        reasons.push("emphasis-shoulders-deprioritize-chest-push");
+      }
+      if (ex.pivotTags.includes("shoulder-dominant-push")) {
+        score += 11;
+        reasons.push("emphasis-shoulders-prioritize-shoulder-push");
+      }
+      if (ex.primaryMuscle === "shoulders" && ex.movementPattern === "abduction") {
+        score += 7;
+        reasons.push("emphasis-shoulders-isolation-rail");
+      }
+    }
+
+    const hamEmphasis = emphasis.muscles.includes("hamstrings");
+    const gluteEmphasis = emphasis.muscles.includes("glutes");
+    if ((hamEmphasis || gluteEmphasis) && (focus === "Full Body" || focus === "Legs")) {
+      if (ex.pivotTags.includes("posterior-chain") || ex.pivotTags.includes("hinge-dominant-lower")) {
+        score += 9;
+        reasons.push("emphasis-posterior-lower-priority");
+      }
+      if (hamEmphasis && ex.pivotTags.includes("quad-dominant-lower") && ex.kind === "compound") {
+        score -= 7;
+        reasons.push("emphasis-hamstrings-soft-deprioritize-quad-compound");
+      }
+    }
+
+    if (gluteEmphasis && (ex.pivotTags.includes("glute-focused") || (ex.primaryMuscle === "glutes" && ex.kind === "compound"))) {
+      score += 8;
+      reasons.push("emphasis-glutes-structural");
+    }
+
+    if (emphasis.rearDeltBoost && (focus === "Pull" || focus === "Full Body")) {
+      if (ex.pivotTags.includes("rear-delt")) {
+        score += 10;
+        reasons.push("emphasis-rear-delt-pull-shape");
+      }
+    }
+
+    if (emphasis.muscles.includes("chest")) {
+      if (ex.pivotTags.includes("chest-dominant-push")) {
+        score += 8;
+        reasons.push("emphasis-chest-semantic-priority");
+      } else if (ex.pivotTags.includes("shoulder-dominant-push")) {
+        score -= 5;
+        reasons.push("emphasis-chest-soft-shoulder-push-penalty");
+      }
+    }
+
+    if (
+      (focus === "Full Body" || focus === "Push") &&
+      !emphasis.muscles.includes("chest") &&
+      ex.pivotTags.includes("chest-dominant-push") &&
+      ex.kind === "compound"
+    ) {
+      score -= 6;
+      reasons.push("diversity-non-chest-emphasis-soft-penalty");
+    }
+
+    // Explicit Layer 2 muscle not mapped onto Layer 1 (e.g. shoulders on Legs): perceptual priority for insertion.
+    if (
+      emphasis.muscles.some((m) => m === ex.primaryMuscle && !isMuscleStructuralForFocus(focus, m))
+    ) {
+      score += 10;
+      reasons.push("layer2-insertion-intent-coherence");
+    }
+
     const unc = emphasisTargets?.uncoveredMuscles;
     if (unc && unc.size > 0 && unc.has(ex.primaryMuscle)) {
       score += 34;
@@ -348,10 +555,10 @@ export function scoreExercise(args: {
       reasons.push("user-emphasis-rear-delt");
     }
 
-    if (emphasisTargets?.needForearmFlex && ex.movementPattern === "elbow-flexion") {
+    if (emphasisTargets?.needForearmFlex && isForearmIntentExercise(ex)) {
       score += 28;
       reasons.push("user-emphasis-forearms-priority");
-    } else if (emphasis.forearmsBoost && ex.movementPattern === "elbow-flexion") {
+    } else if (emphasis.forearmsBoost && isForearmIntentExercise(ex)) {
       score += 13;
       reasons.push("user-emphasis-forearms");
     }
@@ -405,6 +612,24 @@ export function chooseExercises(args: {
       rejected.push({ exercise: ex.name, reason: "duplicate-exercise" });
       return false;
     }
+    if (args.focus === "Push" && (ex.movementPattern === "horizontal-pull" || ex.movementPattern === "vertical-pull") && ex.kind === "compound") {
+      if (!isDirectInsertionIntentExercise(ex, args.focus, args.emphasis)) {
+        rejected.push({ exercise: ex.name, reason: "focus-purity-push-no-pull-compound" });
+        return false;
+      }
+    }
+    if (args.focus === "Pull" && (ex.pivotTags.includes("chest-dominant-push") || ex.movementPattern === "horizontal-press" || ex.movementPattern === "adduction") && ex.kind === "compound") {
+      if (!isDirectInsertionIntentExercise(ex, args.focus, args.emphasis)) {
+        rejected.push({ exercise: ex.name, reason: "focus-purity-pull-no-chest-push-compound" });
+        return false;
+      }
+    }
+    if (args.focus === "Legs" && ex.kind === "compound" && (ex.movementPattern === "horizontal-press" || ex.movementPattern === "vertical-press" || ex.movementPattern === "horizontal-pull" || ex.movementPattern === "vertical-pull" || ex.movementPattern === "adduction")) {
+      if (!isDirectInsertionIntentExercise(ex, args.focus, args.emphasis)) {
+        rejected.push({ exercise: ex.name, reason: "focus-purity-legs-no-unrelated-upper-compound" });
+        return false;
+      }
+    }
     if (args.focus === "Full Body") {
       const hasPush = picked.some((p) => p.movementPattern === "horizontal-press" || p.movementPattern === "vertical-press");
       const hasPull = picked.some((p) => p.movementPattern === "horizontal-pull" || p.movementPattern === "vertical-pull");
@@ -428,7 +653,7 @@ export function chooseExercises(args: {
 
   while (picked.length < args.maxExercises) {
     const emphasisTargets = buildEmphasisTargets(args.emphasis, picked);
-    const missingTargets = listMissingEmphasisTargets(emphasisTargets);
+    const missingTargets = listMissingEmphasisTargets(emphasisTargets, args.focus);
     // Preserve workout identity first, then reserve remaining capacity for explicit emphasis guarantees.
     const identityReserve =
       args.focus === "Full Body"
@@ -436,12 +661,23 @@ export function chooseExercises(args: {
         : Math.min(3, Math.max(2, args.maxExercises - 1));
     const emphasisCapacity = Math.max(0, args.maxExercises - identityReserve);
     const requestedEmphasisCount = emphasisTargetCount(args.emphasis);
-    // Target a stronger, but bounded, Layer-2 shaping effect.
-    const directEmphasisQuota = Math.min(
-      emphasisCapacity,
-      requestedEmphasisCount,
-      Math.max(1, Math.round(args.maxExercises * 0.4)),
-    );
+    const compressedSession = args.maxExercises <= 4;
+    const readinessStrain = args.soreness >= 7 || args.energy <= 4 || args.sleep < 6;
+    const conflictDeduction =
+      (compressedSession && requestedEmphasisCount >= 3 ? 1 : 0) + (compressedSession && readinessStrain ? 1 : 0);
+    const quotaRatio = compressedSession && readinessStrain ? 0.32 : compressedSession ? 0.36 : 0.4;
+    /** Floor: Layer 2 visibility (cross-domain + insertion-required muscles vs focus, e.g. shoulders on Legs). */
+    const layer2VisibilityFloor = Math.min(countLayer2VisibilityFloor(args.emphasis, args.focus), emphasisCapacity);
+    const computedDirectQuota =
+      requestedEmphasisCount <= 0
+        ? 0
+        : Math.min(
+          emphasisCapacity,
+          Math.max(1, requestedEmphasisCount - conflictDeduction),
+          Math.max(1, Math.round(args.maxExercises * quotaRatio)),
+        );
+    const directEmphasisQuota =
+      requestedEmphasisCount <= 0 ? 0 : Math.max(computedDirectQuota, layer2VisibilityFloor);
     const pickedDirectEmphasisCount = picked.filter((p) => isDirectEmphasisExercise(p, args.emphasis)).length;
     const neededDirectQuota = Math.max(0, directEmphasisQuota - pickedDirectEmphasisCount);
     const activeMissingTargets = missingTargets.slice(0, emphasisCapacity);
@@ -468,7 +704,13 @@ export function chooseExercises(args: {
     lastDebugScoring = sorted.map(({ ex, score, reasons }) => ({ exercise: ex.name, score, reasons }));
 
     let pickedThisRound = false;
-    for (const item of sorted) {
+    /** Until direct-emphasis quota is met, evaluate matching exercises first so Layer 2 cannot be crowded out by Layer 1 fillers early (e.g. Legs + shoulders). */
+    const directRanked = sorted.filter((x) => isDirectEmphasisExercise(x.ex, args.emphasis));
+    const fillerRanked = sorted.filter((x) => !isDirectEmphasisExercise(x.ex, args.emphasis));
+    const scanOrder =
+      neededDirectQuota > 0 && directRanked.length ? [...directRanked, ...fillerRanked] : sorted;
+
+    for (const item of scanOrder) {
       if (!isDirectEmphasisExercise(item.ex, args.emphasis) && neededDirectQuota > 0 && (remainingSlots - 1) < neededDirectQuota) {
         rejected.push({ exercise: item.ex.name, reason: "emphasis-direct-quota-reserved" });
         continue;
@@ -487,7 +729,7 @@ export function chooseExercises(args: {
 
   // Lightweight post-pass: try one-for-one safe swaps to satisfy any still-missing explicit emphasis targets.
   const finalEmphasisTargets = buildEmphasisTargets(args.emphasis, picked);
-  const finalMissing = listMissingEmphasisTargets(finalEmphasisTargets);
+  const finalMissing = listMissingEmphasisTargets(finalEmphasisTargets, args.focus);
   const finalIdentityReserve =
     args.focus === "Full Body"
       ? Math.min(2, Math.max(1, args.maxExercises - 1))
@@ -529,7 +771,7 @@ export function chooseExercises(args: {
               (
                 args.emphasis.muscles.includes(p.primaryMuscle) ||
                 (args.emphasis.rearDeltBoost && p.pivotTags.includes("rear-delt")) ||
-                (args.emphasis.forearmsBoost && p.movementPattern === "elbow-flexion")
+                (args.emphasis.forearmsBoost && isForearmIntentExercise(p))
               );
             return isFocusPrimary || isFocusPattern || isExplicitEmphasisDirect;
           })
@@ -542,7 +784,7 @@ export function chooseExercises(args: {
     }
   }
 
-  const ordered = orderPickedForEmphasis(picked, args.emphasis);
+  const ordered = orderPickedCoachLike(picked, args.focus, args.emphasis);
 
   return {
     picked: ordered,
