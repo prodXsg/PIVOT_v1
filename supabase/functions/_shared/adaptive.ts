@@ -404,7 +404,7 @@ export function isDuplicateLegal(ex: ExerciseMeta, currentWorkout: ExerciseMeta[
  * Counts how many exercises with the same perceptual role are already selected.
  * Returns true if adding this exercise would exceed safe thresholds.
  */
-export function exceedsPerceptualRedundancyThreshold(ex: ExerciseMeta, currentWorkout: ExerciseMeta[]): boolean {
+function exceedsPerceptualRedundancyThreshold(ex: ExerciseMeta, currentWorkout: ExerciseMeta[]): boolean {
   const role = getPerceptualRole(ex);
   const sameRoleCount = currentWorkout.filter((e) => getPerceptualRole(e) === role).length;
 
