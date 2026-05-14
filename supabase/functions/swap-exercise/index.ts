@@ -1,5 +1,5 @@
 import { callGemini, corsHeaders, json, sanitizeInput } from "../_shared/gemini.ts";
-import { EXERCISES, canonicalName, inferFocus, scoreExercise, shouldDebugAdaptive, isFocusLegal, isDuplicateLegal } from "../_shared/adaptive.ts";
+import { EXERCISES, canonicalName, inferFocus, scoreExercise, shouldDebugAdaptive, isFocusLegal, isDuplicateLegal, exceedsPerceptualRedundancyThreshold } from "../_shared/adaptive.ts";
 
 function chooseDeterministicReplacement(args: {
   focus: ReturnType<typeof inferFocus>;
@@ -28,6 +28,32 @@ function chooseDeterministicReplacement(args: {
       if (!isFocusLegal(e, args.focus)) {
         return false;
       }
+      
+      // HARD INVARIANT: Global duplicate filter (against current workout + prior pivots)
+      if (args.currentWorkout) {
+        const currentNames = new Set(args.currentWorkout.map((ex) => canonicalName(ex.name)));
+        if (currentNames.has(canonicalName(e.name))) {
+          return false;
+        }
+      }
+      if (args.priorPivots) {
+        const priorNames = new Set(args.priorPivots.map((p) => canonicalName(p.replacement ?? "")));
+        if (priorNames.has(canonicalName(e.name))) {
+          return false;
+        }
+      }
+      
+      // HARD INVARIANT: Perceptual redundancy filter
+      if (args.currentWorkout && args.currentWorkout.length > 0) {
+        const currentWorkoutExercises = args.currentWorkout.map((item) => 
+          pool.find((ex) => canonicalName(ex.name) === canonicalName(item.name))
+        ).filter(Boolean) as ExerciseMeta[];
+        
+        if (exceedsPerceptualRedundancyThreshold(e, currentWorkoutExercises)) {
+          return false;
+        }
+      }
+      
       return true;
     });
 
@@ -128,35 +154,6 @@ function parseSetsReps(s: string): { sets: number; reps: string } {
   return { sets: cross ? Number.parseInt(cross[1], 10) : 3, reps: cross ? cross[2].trim() : "8-10" };
 }
 
-function fallbackReplacement(constraint: string) {
-  const c = constraint.toLowerCase();
-  if (c.includes("shoulder") || c.includes("pain") || c.includes("hurt")) {
-    return {
-      name: "Machine Chest Press",
-      setsReps: "3 sets - 10-12 reps",
-      cue: "Keep the range pain-free.",
-      rationale: "Keeps pressing work more stable while avoiding the painful range.",
-      constraint,
-    };
-  }
-  if (c.includes("time") || c.includes("late") || c.includes("minutes")) {
-    return {
-      name: "Push-up Drop Set",
-      setsReps: "2 sets - AMRAP reps",
-      cue: "Stop before form breaks.",
-      rationale: "Compresses the push stimulus into a shorter block.",
-      constraint,
-    };
-  }
-  return {
-    name: "Dumbbell Floor Press",
-    setsReps: "3 sets - 10-12 reps",
-    cue: "Pause briefly at the bottom.",
-    rationale: "Maintains a similar pressing pattern without needing the same equipment.",
-    constraint,
-  };
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -176,7 +173,45 @@ Deno.serve(async (req) => {
     used.add(canonicalName(String(exercise?.name ?? "")));
 
     const focus = inferFocus(String(workoutFocus ?? "Full Body"));
-    const pivotScoring = EXERCISES
+    
+    // STEP 1: BUILD RAW CANDIDATE SET
+    // Start with all exercises except the original being replaced
+    let candidates = EXERCISES.filter((e) => canonicalName(e.name) !== canonicalName(String(exercise?.name ?? "")));
+    
+    // STEP 2: HARD ELIMINATION FILTERS (PRE-SCORING)
+    // Apply hard invariants BEFORE any scoring occurs
+    candidates = candidates.filter((e) => {
+      // A. WORKOUT FOCUS LEGALITY FILTER
+      if (!isFocusLegal(e, focus)) {
+        return false;
+      }
+      
+      // B. GLOBAL DUPLICATE FILTER
+      if (used.has(canonicalName(e.name))) {
+        return false;
+      }
+      
+      // C. PERCEPTUAL REDUNDANCY FILTER (if we have current workout context)
+      if (Array.isArray(currentExercises) && currentExercises.length > 0) {
+        const currentWorkoutExercises = currentExercises.map((name: unknown) => 
+          EXERCISES.find((ex) => canonicalName(ex.name) === canonicalName(String(name)))
+        ).filter(Boolean) as ExerciseMeta[];
+        
+        if (exceedsPerceptualRedundancyThreshold(e, currentWorkoutExercises)) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+    
+    // If no legal candidates remain, return null (no replacement possible)
+    if (candidates.length === 0) {
+      return json(null);
+    }
+    
+    // STEP 3: SCORING (only on legal candidates)
+    const pivotScoring = candidates
       .map((e) => {
         const evald = scoreExercise({
         ex: e,
@@ -191,22 +226,12 @@ Deno.serve(async (req) => {
       });
       return { name: e.name, score: evald.score, reasons: evald.reasons };
     });
-    const allowed = EXERCISES
+    
+    // Soft score filter: only consider exercises with reasonable scores
+    const allowed = candidates
       .filter((e) => {
         const entry = pivotScoring.find((s) => canonicalName(s.name) === canonicalName(e.name));
-        // Soft scoring filter: only consider exercises with reasonable scores
-        if ((entry?.score ?? -999) <= -10) {
-          return false;
-        }
-        // HARD INVARIANT: Focus legality — only allow focus-legal exercises
-        if (!isFocusLegal(e, focus)) {
-          return false;
-        }
-        // HARD INVARIANT: Duplicate check — reject if already used
-        if (used.has(canonicalName(e.name))) {
-          return false;
-        }
-        return true;
+        return (entry?.score ?? -999) > -10;
       });
     const allowedText = allowed.map((e) => `- ${e.name}`).join("\n");
 
@@ -250,7 +275,8 @@ Deno.serve(async (req) => {
         priorPivots: Array.isArray(priorPivots) ? priorPivots : undefined,
       });
       if (det) return json(det);
-      return json(fallbackReplacement(safeConstraint));
+      // No legal replacement possible - return null instead of fallback
+      return json(null);
     }
 
     return json({
@@ -281,6 +307,7 @@ Deno.serve(async (req) => {
         : undefined,
     });
   } catch {
-    return json(fallbackReplacement(""));
+    // Function failed entirely - return null (no replacement possible)
+    return json(null);
   }
 });
