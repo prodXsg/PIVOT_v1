@@ -401,22 +401,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const swapExercise = async (exerciseId: string, constraint: string, priorPivots: PriorPivot[] = []): Promise<Replacement> => {
     const exercise = todayWorkout?.exercises.find((e) => e.id === exerciseId);
-    return invoke<Replacement>(
-      "swap-exercise",
-      {
-        exercise,
-        constraint,
-        workoutFocus: todayWorkout?.focus,
-        priorPivots,
-        currentExercises: todayWorkout?.exercises?.map((e) => e.name) ?? [],
-        recentExercises,
-        recentPivots: recentPivotReplacements,
-        equipment: "Full Gym",
-        note: lastCheckIn?.note ?? "",
-        adaptiveMemory,
-      },
-      undefined
+    const normalize = (value: string) => String(value).trim().toLowerCase();
+    const currentExerciseNames = new Set(
+      (todayWorkout?.exercises ?? [])
+        .map((e) => normalize(e.name))
+        .filter((name) => exercise ? name !== normalize(exercise.name) : true)
     );
+
+    const attemptedReplacements = new Set<string>();
+    let nextPriorPivots = [...priorPivots];
+    let lastReplacement: Replacement | null = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const replacement = await invoke<Replacement>(
+        "swap-exercise",
+        {
+          exercise,
+          constraint,
+          workoutFocus: todayWorkout?.focus,
+          priorPivots: nextPriorPivots,
+          currentExercises: todayWorkout?.exercises?.map((e) => e.name) ?? [],
+          recentExercises,
+          recentPivots: recentPivotReplacements,
+          equipment: "Full Gym",
+          note: lastCheckIn?.note ?? "",
+          adaptiveMemory,
+        },
+        undefined
+      );
+
+      lastReplacement = replacement;
+      const replacementName = normalize(replacement.name);
+      if (
+        !exercise ||
+        (!currentExerciseNames.has(replacementName) &&
+          replacementName !== normalize(exercise.name) &&
+          !attemptedReplacements.has(replacementName))
+      ) {
+        return replacement;
+      }
+
+      attemptedReplacements.add(replacementName);
+      nextPriorPivots = [
+        ...nextPriorPivots,
+        { original: exercise.name, replacement: replacement.name, constraint },
+      ];
+    }
+
+    return lastReplacement ?? Promise.reject(new Error("Unable to generate a unique pivot replacement."));
   };
 
   const pivotExercise: AppState["pivotExercise"] = (exerciseId, replacement) => {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { validateEmail, couldBeValidEmail } from "@/lib/emailValidation";
 
 export function AuthScreen({
   onCreateAccount,
@@ -12,15 +13,42 @@ export function AuthScreen({
   const [email, setEmail] = useState("");
   const [emailTouched, setEmailTouched] = useState(false);
   const [checkingEmail, setCheckingEmail] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Improved email validation: stricter regex, rejects obvious invalid TLDs
-  const emailValid = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/.test(email.trim()) &&
-    /\.[a-zA-Z]{2,}$/.test(email.trim()) && !/\.(tom|vom|test|example|invalid)$/i.test(email.trim());
-  const showError = emailTouched && email.trim().length > 0 && !emailValid;
+  // Validate on blur for production-grade email quality
+  const validateOnBlur = () => {
+    if (!email.trim()) {
+      setValidationError(null);
+      return;
+    }
+    const result = validateEmail(email.trim());
+    setValidationError(result.isValid ? null : result.error || "Invalid email");
+  };
+
+  const handleEmailBlur = () => {
+    setEmailTouched(true);
+    validateOnBlur();
+  };
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    // Clear error on change to avoid jitter (only re-validate on blur)
+    if (validationError) {
+      setValidationError(null);
+    }
+  };
 
   const handleContinue = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailValid) { setEmailTouched(true); return; }
+    
+    // Final validation before submit
+    const validation = validateEmail(email.trim());
+    if (!validation.isValid) {
+      setValidationError(validation.error || "Invalid email");
+      setEmailTouched(true);
+      return;
+    }
+    
     setCheckingEmail(true);
     // Simulate checking if email exists (replace with actual API call)
     try {
@@ -38,6 +66,9 @@ export function AuthScreen({
       setCheckingEmail(false);
     }
   };
+
+  // Button enable logic: permissive during typing, strict on submit
+  const canSubmit = couldBeValidEmail(email) && !checkingEmail;
 
   return (
     <div
@@ -133,44 +164,44 @@ export function AuthScreen({
             autoComplete="email"
             placeholder="your@email.com"
             value={email}
-            onChange={(e) => { setEmail(e.target.value); setEmailTouched(false); }}
-            onBlur={() => setEmailTouched(true)}
+            onChange={(e) => handleEmailChange(e.target.value)}
+            onBlur={handleEmailBlur}
             disabled={checkingEmail}
             style={{
               width: "100%",
               height: 50,
               borderRadius: 14,
               background: "hsl(var(--muted))",
-              border: `1.5px solid ${showError ? "#ff5a5a" : "hsl(var(--foreground)/0.10)"}`,
+              border: `1.5px solid ${validationError && emailTouched ? "#ff5a5a" : "hsl(var(--foreground)/0.10)"}`,
               paddingLeft: 14,
               paddingRight: 14,
               fontSize: 15,
               fontWeight: 400,
               color: "hsl(var(--foreground))",
               outline: "none",
-              marginBottom: showError ? 6 : 12,
+              marginBottom: validationError && emailTouched ? 6 : 12,
               transition: "border-color 150ms ease-out",
               boxSizing: "border-box",
             }}
           />
-          {showError && (
+          {validationError && emailTouched && (
             <p style={{ fontSize: 12, color: "#ff5a5a", marginBottom: 8 }}>
-              Please enter a valid email address.
+              {validationError}
             </p>
           )}
           <button
             type="submit"
-            disabled={!email.trim() || checkingEmail}
+            disabled={!canSubmit}
             style={{
               width: "100%",
               height: 50,
               borderRadius: 14,
               background: "transparent",
-              border: `1.5px solid ${email.trim() && !checkingEmail ? "hsl(var(--foreground)/0.25)" : "hsl(var(--foreground)/0.10)"}`,
+              border: `1.5px solid ${canSubmit ? "hsl(var(--foreground)/0.25)" : "hsl(var(--foreground)/0.10)"}`,
               fontSize: 15,
               fontWeight: 600,
-              color: email.trim() && !checkingEmail ? "hsl(var(--foreground))" : "hsl(var(--foreground)/0.3)",
-              cursor: email.trim() && !checkingEmail ? "pointer" : "default",
+              color: canSubmit ? "hsl(var(--foreground))" : "hsl(var(--foreground)/0.3)",
+              cursor: canSubmit ? "pointer" : "default",
               transition: "border-color 150ms ease-out, color 150ms ease-out",
             }}
           >

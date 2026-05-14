@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, Check, Clock, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, Check, Clock, MoreHorizontal, RefreshCw } from "lucide-react";
 import { useApp, PriorPivot } from "@/context/AppContext";
 import { Exercise } from "@/lib/mockData";
 import { PivotModal } from "./PivotModal";
@@ -290,7 +290,34 @@ export function WorkoutScreen({
 
                   {/* Right-side action */}
                   {!isPreview && (
-                    <div style={{ flexShrink: 0 }}>
+                    <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                      {!isInactive && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOptionsOpenId(null);
+                            setPivotTarget(ex);
+                          }}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            padding: "8px 12px",
+                            borderRadius: 999,
+                            border: "1px solid rgba(199,247,61,0.25)",
+                            background: "rgba(199,247,61,0.08)",
+                            color: "#C7F73D",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <RefreshCw size={14} strokeWidth={2.2} />
+                          Pivot
+                        </button>
+                      )}
+
                       {isDone ? (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleUndoDone(ex.id); }}
@@ -343,7 +370,6 @@ export function WorkoutScreen({
                       { label: "Done", sub: "Completed all sets", action: () => handleDone(ex.id), accent: false },
                       { label: "Partial", sub: "Got some sets in", action: () => handlePartial(ex.id), accent: false },
                       { label: "Skip", sub: "Skip this exercise", action: () => handleSkip(ex.id), accent: false },
-                      { label: "Can't do — Pivot", sub: "Swap for an alternative", action: () => { setOptionsOpenId(null); setPivotTarget(ex); }, accent: true },
                     ].map((item, idx, arr) => (
                       <button
                         key={item.label}

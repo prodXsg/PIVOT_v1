@@ -10,7 +10,7 @@ function getGreeting(hour: number, name: string): string {
       ? "Good morning"
       : hour >= 12 && hour < 17
       ? "Good afternoon"
-      : hour >= 17 && hour < 21
+      : hour >= 17 && hour < 22
       ? "Good evening"
       : "Good night";
   return name ? `${salutation}, ${name}` : salutation;
@@ -21,6 +21,15 @@ function getCelebration(count: number): string {
   if (count <= 3) return "Building the habit.";
   if (count <= 6) return "Consistency is compound interest.";
   return "You're the algorithm now.";
+}
+
+function getActiveWorkoutHeadline(exercisesCompleted: number, totalExercises: number): string {
+  if (totalExercises === 0) return "Resume your session";
+  const progressPercent = Math.round((exercisesCompleted / totalExercises) * 100);
+  if (progressPercent < 25) return "Keep the momentum";
+  if (progressPercent < 50) return "Halfway there";
+  if (progressPercent < 75) return "Almost done";
+  return "Finish strong";
 }
 
 function getRecovery(focus: string): string {
@@ -111,6 +120,14 @@ export function HomeScreen({
   const isStarted = workoutState === "WORKOUT_STARTED";
   const isCompleted = workoutState === "WORKOUT_COMPLETED";
 
+  // Calculate exercise progress early for active workout headline
+  const exercisesCompleted = todayWorkout
+    ? Object.entries(exerciseStatusById).filter(([id, st]) =>
+        st === "completed" && todayWorkout.exercises.some((e) => e.id === id)
+      ).length
+    : 0;
+  const totalExercises = todayWorkout?.exercises.length ?? 0;
+
   const eyebrow = isNoWorkout
     ? isReturning ? "WELCOME BACK" : "Ready? 💪"
     : isStarted ? "IN PROGRESS 💪"
@@ -121,7 +138,7 @@ export function HomeScreen({
   const headline = isNoWorkout
     ? isReturning ? "Let's ease back in" : "Check-in"
     : isGenerated ? "Your workout is ready"
-    : isStarted ? "Workout in progress"
+    : isStarted ? getActiveWorkoutHeadline(exercisesCompleted, totalExercises)
     : getCelebration(completedWorkoutsCount);
 
   const subtext = isNoWorkout
@@ -149,11 +166,6 @@ export function HomeScreen({
   const lastQuality = sessionQualityHistory[0];
 
   // Post-workout stats
-  const exercisesCompleted = todayWorkout
-    ? Object.entries(exerciseStatusById).filter(([id, st]) =>
-        st === "completed" && todayWorkout.exercises.some((e) => e.id === id)
-      ).length
-    : 0;
   const sessionPivots = todayWorkout
     ? todayWorkout.exercises.filter((e) => e.pivoted).length
     : 0;
