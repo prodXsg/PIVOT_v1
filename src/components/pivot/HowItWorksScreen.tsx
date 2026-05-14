@@ -4,20 +4,20 @@ import { SlideToStart } from "./SlideToStart";
 const ITEMS = [
   {
     Icon: Clock,
-    title: "Check in — 15 seconds",
-    body: "Tell Pivot your sleep, energy, soreness, and how much time you have today.",
+    title: "Check in",
+    body: "Sleep, energy, soreness, time — 15 seconds is all it takes.",
     prominent: false,
   },
   {
     Icon: Dumbbell,
-    title: "Get today's workout",
-    body: "AI builds a plan around your exact state — not a generic template.",
+    title: "Get your plan",
+    body: "A workout built around your exact state — not a generic template.",
     prominent: false,
   },
   {
     Icon: RefreshCw,
     title: "Pivot when life happens",
-    body: "Swap any exercise around real constraints, any time during your workout.",
+    body: "Swap any exercise around real constraints, any time mid-workout.",
     prominent: true,
   },
 ];
@@ -34,60 +34,92 @@ export function HowItWorksScreen({ onContinue }: { onContinue: () => void }) {
       }}
     >
       {/* Header */}
-      <div className="text-center" style={{ animation: "hiw-rise 360ms ease-out both" }}>
-        <h1
-          className="mt-4"
+      <div style={{ animation: "hiw-rise 360ms ease-out both" }}>
+        <p
           style={{
-            fontSize: 26,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: "2px",
+            color: "#C7F73D",
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          How it works
+        </p>
+        <h1
+          style={{
+            fontSize: 28,
             fontWeight: 800,
-            letterSpacing: "-0.4px",
-            lineHeight: 1.15,
+            letterSpacing: "-0.5px",
+            lineHeight: 1.1,
             color: "hsl(var(--foreground))",
           }}
         >
-          Here's how Pivot works
+          Workouts that read
+          <br />
+          the room
         </h1>
+        <p
+          style={{
+            marginTop: 10,
+            fontSize: 15,
+            fontWeight: 400,
+            lineHeight: 1.5,
+            color: "hsl(var(--foreground)/0.50)",
+            maxWidth: 300,
+          }}
+        >
+          Your body is different every day. Your plan should be too.
+        </p>
       </div>
 
       {/* Items */}
-      <div className="mt-6 flex flex-col gap-5 flex-1">
+      <div className="mt-7 flex flex-col gap-3">
         {ITEMS.map(({ Icon, title, body, prominent }, i) => (
           <div
             key={title}
-            className={`flex gap-4 items-start rounded-2xl p-4 ${prominent ? "border border-primary/20" : ""}`}
+            className="flex gap-3.5 items-start rounded-2xl"
             style={{
-              background: prominent ? "rgba(199,247,61,0.06)" : "transparent",
-              animation: `hiw-rise 360ms ${60 + i * 70}ms ease-out both`,
+              padding: prominent ? 16 : "12px 4px",
+              background: prominent ? "rgba(199,247,61,0.05)" : "transparent",
+              border: prominent ? "1px solid rgba(199,247,61,0.15)" : "1px solid transparent",
+              animation: `hiw-rise 360ms ${80 + i * 80}ms ease-out both`,
             }}
           >
             <div
-              className="shrink-0 flex items-center justify-center rounded-2xl"
+              className="shrink-0 flex items-center justify-center rounded-xl"
               style={{
-                width: prominent ? 52 : 46,
-                height: prominent ? 52 : 46,
-                background: prominent ? "rgba(199,247,61,0.18)" : "rgba(199,247,61,0.10)",
+                width: 40,
+                height: 40,
+                background: prominent
+                  ? "rgba(199,247,61,0.14)"
+                  : "rgba(199,247,61,0.07)",
+                boxShadow: prominent
+                  ? "0 0 0 1px rgba(199,247,61,0.10), 0 2px 8px rgba(199,247,61,0.08)"
+                  : "none",
               }}
             >
-              <Icon size={prominent ? 26 : 22} color="#C7F73D" strokeWidth={1.8} />
+              <Icon size={prominent ? 20 : 18} color="#C7F73D" strokeWidth={1.6} />
             </div>
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <p
                 style={{
-                  fontSize: prominent ? 17 : 15,
-                  fontWeight: prominent ? 800 : 700,
-                  color: "hsl(var(--foreground))",
-                  lineHeight: 1.2,
+                  fontSize: 15,
+                  fontWeight: prominent ? 800 : 600,
+                  color: prominent ? "#C7F73D" : "hsl(var(--foreground))",
+                  lineHeight: 1.25,
                 }}
               >
                 {title}
               </p>
               <p
-                className="mt-1"
                 style={{
-                  fontSize: 14,
+                  marginTop: 3,
+                  fontSize: 13,
                   fontWeight: 400,
-                  lineHeight: 1.55,
-                  color: "hsl(var(--foreground)/0.55)",
+                  lineHeight: 1.5,
+                  color: "hsl(var(--foreground)/0.45)",
                 }}
               >
                 {body}
@@ -97,8 +129,21 @@ export function HowItWorksScreen({ onContinue }: { onContinue: () => void }) {
         ))}
       </div>
 
-      {/* Slide CTA — sits on screen bg; SlideToStart retains its own track styling */}
-      <div style={{ marginTop: 20, animation: "hiw-rise 360ms 290ms ease-out both" }}>
+      {/* Bridge + CTA */}
+      <div className="flex-1" />
+      <div style={{ animation: "hiw-rise 360ms 320ms ease-out both" }}>
+        <p
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            lineHeight: 1.5,
+            color: "hsl(var(--foreground)/0.35)",
+            textAlign: "center",
+            marginBottom: 14,
+          }}
+        >
+          No guesswork. No guilt. Just adaptation.
+        </p>
         <SlideToStart label="Let's go" onComplete={onContinue} />
       </div>
 
