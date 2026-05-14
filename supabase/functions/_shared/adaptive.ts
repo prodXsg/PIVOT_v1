@@ -241,6 +241,231 @@ function isForearmIntentExercise(ex: ExerciseMeta): boolean {
   return isPerceptualForearmRepresentative(ex);
 }
 
+/**
+ * Perceptual role: a semantic category describing how an exercise *feels* and its informational role in the workout.
+ * Exercises with the same perceptual role are considered redundant, even if technically different.
+ * Examples:
+ * - Seated Calf Raise + Standing Calf Raise = "calf-isolation"
+ * - Cable Curl + Dumbbell Curl = "biceps-curl"
+ * - Pec Deck + Cable Fly = "chest-fly"
+ * - Machine Chest Press + Dumbbell Chest Press = "chest-press"
+ */
+type PerceptualRole = string;
+
+function getPerceptualRole(ex: ExerciseMeta): PerceptualRole {
+  // Calf isolations: all grouped together
+  if (ex.primaryMuscle === "calves") return "calf-isolation";
+
+  // Core direct: group all planks, ab-wheels, etc.
+  if (isCoreDirect(ex)) return "core-direct";
+
+  // Chest isolations: pec-deck, cable-fly grouped together
+  if (isChestIsolation(ex)) return "chest-fly";
+
+  // Chest presses: all types of chest press grouped
+  if (ex.primaryMuscle === "chest" && (ex.movementPattern === "horizontal-press" || ex.movementPattern === "adduction") && ex.kind === "compound")
+    return "chest-press";
+
+  // Shoulder press variations: grouped
+  if (ex.primaryMuscle === "shoulders" && ex.movementPattern === "vertical-press" && ex.kind === "compound")
+    return "shoulder-press";
+
+  // Shoulder lateral raises (abduction isolations): grouped
+  if (isShoulderIsolation(ex)) return "shoulder-raise";
+
+  // Rear-delt isolations: face-pull, reverse pec-deck, etc.
+  if (ex.pivotTags.includes("rear-delt")) return "rear-delt-isolation";
+
+  // Biceps curls (all curl variations): grouped
+  if (ex.primaryMuscle === "biceps" && ex.movementPattern === "elbow-flexion")
+    return "biceps-curl";
+
+  // Triceps extensions: all grouped
+  if (ex.primaryMuscle === "triceps" && ex.movementPattern === "elbow-extension")
+    return "triceps-extension";
+
+  // Lat pulldowns (vertical pulls, mostly mechanical): grouped
+  if (ex.movementPattern === "vertical-pull" && ex.kind === "compound")
+    return "vertical-pull-compound";
+
+  // Rows (horizontal pulls): all row variations grouped
+  if (ex.movementPattern === "horizontal-pull" && ex.kind === "compound")
+    return "horizontal-pull-compound";
+
+  // Squats: group all squat-pattern compounds
+  if (ex.movementPattern === "squat" && ex.kind === "compound")
+    return "squat-compound";
+
+  // Hinges (RDL, etc.): group all hinge compounds
+  if (ex.movementPattern === "hinge" && ex.kind === "compound")
+    return "hinge-compound";
+
+  // Lunges: group all lunge variations
+  if (ex.movementPattern === "lunge" && ex.kind === "compound")
+    return "lunge-compound";
+
+  // Leg extensions/curls: group leg-machine isolations
+  if ((ex.primaryMuscle === "quads" || ex.primaryMuscle === "hamstrings") && (ex.movementPattern === "squat" || ex.movementPattern === "hinge"))
+    return "leg-machine-isolation";
+
+  // Default: unique role based on primary muscle + pattern
+  return `${ex.primaryMuscle}-${ex.movementPattern}`;
+}
+
+/** Calculate how much perceptual redundancy penalty an exercise should receive. */
+function perceptualRedundancyPenalty(ex: ExerciseMeta, picked: ExerciseMeta[]): number {
+  const role = getPerceptualRole(ex);
+  const sameRoleCount = picked.filter((p) => getPerceptualRole(p) === role).length;
+
+  if (sameRoleCount === 0) return 0; // first exercise with this role: no penalty
+  if (sameRoleCount === 1) return -6; // second exercise: moderate penalty (two calf raises feel redundant)
+  if (sameRoleCount === 2) return -14; // third exercise: heavy penalty
+  return -20; // fourth+: severe penalty (should almost never reach this in normal workouts)
+}
+
+/**
+ * HARD INVARIANT: Focus legality
+ * Determines if an exercise is legally allowed for a given focus.
+ * Push workouts reject pull exercises, Pull workouts reject push exercises, etc.
+ */
+export function isFocusLegal(ex: ExerciseMeta, focus: Focus): boolean {
+  const rule = FOCUS_RULES[focus];
+  
+  // Primary/secondary muscles are always legal
+  if (rule.primary.includes(ex.primaryMuscle) || rule.secondary.includes(ex.primaryMuscle)) {
+    return true;
+  }
+
+  // Hard boundary violations: focus boundaries that must NEVER be crossed
+  if (focus === "Push") {
+    // Push workouts reject pull compounds and back exercises
+    const isPullCompound = 
+      (ex.movementPattern === "horizontal-pull" || ex.movementPattern === "vertical-pull") && 
+      ex.kind === "compound";
+    const isBackPrimary = ex.primaryMuscle === "back";
+    if (isPullCompound || isBackPrimary) return false;
+  }
+
+  if (focus === "Pull") {
+    // Pull workouts reject push compounds and chest exercises
+    const isPushCompound = 
+      (ex.movementPattern === "horizontal-press" || ex.movementPattern === "vertical-press") && 
+      ex.kind === "compound";
+    const isChestPrimary = ex.primaryMuscle === "chest";
+    if (isPushCompound || isChestPrimary) return false;
+  }
+
+  if (focus === "Legs") {
+    // Legs workouts can have shoulders/arms only if explicitly inserted (emphasis)
+    // Reject if it's an upper-body compound unrelated to leg insertion intent
+    const isUpperCompound = 
+      (ex.primaryMuscle === "chest" || ex.primaryMuscle === "back" || ex.primaryMuscle === "biceps") &&
+      ex.kind === "compound";
+    if (isUpperCompound) return false;
+  }
+
+  if (focus === "Chest" || focus === "Back" || focus === "Biceps" || focus === "Triceps") {
+    // Single-muscle focus workouts reject compounds from opposing domains
+    if (focus === "Chest" && (ex.movementPattern === "horizontal-pull" || ex.movementPattern === "vertical-pull") && ex.kind === "compound")
+      return false;
+    if (focus === "Back" && (ex.movementPattern === "horizontal-press" || ex.movementPattern === "vertical-press") && ex.kind === "compound")
+      return false;
+  }
+
+  // Lightweight cross-domain insertion is allowed (e.g., some shoulder work on Chest days)
+  // but only if it doesn't violate structural coherence
+  return true;
+}
+
+/**
+ * HARD INVARIANT: Duplicate legality
+ * Checks if an exercise is already in the workout or has been pivoted.
+ */
+export function isDuplicateLegal(ex: ExerciseMeta, currentWorkout: ExerciseMeta[], priorPivots?: Array<{ replacement?: string }>): boolean {
+  const canon = canonicalName(ex.name);
+  
+  // Check against current workout exercises
+  if (currentWorkout.some((e) => canonicalName(e.name) === canon)) {
+    return false;
+  }
+
+  // Check against prior pivots in this session
+  if (priorPivots) {
+    if (priorPivots.some((p) => canonicalName(p.replacement ?? "") === canon)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * HARD INVARIANT: Perceptual redundancy threshold
+ * Counts how many exercises with the same perceptual role are already selected.
+ * Returns true if adding this exercise would exceed safe thresholds.
+ */
+function exceedsPerceptualRedundancyThreshold(ex: ExerciseMeta, currentWorkout: ExerciseMeta[]): boolean {
+  const role = getPerceptualRole(ex);
+  const sameRoleCount = currentWorkout.filter((e) => getPerceptualRole(e) === role).length;
+
+  // Hard limit: no more than 1 exercise per perceptual role per workout
+  // Exception: Full Body and 6+ exercise sessions can have 2 different roles (e.g., two back variations)
+  const isFullBodyExtended = currentWorkout.length >= 6;
+  
+  if (isFullBodyExtended && sameRoleCount >= 2) return true;
+  if (!isFullBodyExtended && sameRoleCount >= 1) return true;
+
+  return false;
+}
+
+/**
+ * HARD INVARIANT: Comprehensive replacement legality
+ * Validates that a replacement is legal for the full workout context.
+ * Must pass: focus, duplicates, perceptual redundancy, and integrity checks.
+ */
+function isReplacementLegal(args: {
+  replacement: ExerciseMeta;
+  focus: Focus;
+  currentWorkout: ExerciseMeta[];
+  originalExercise?: ExerciseMeta;
+  priorPivots?: Array<{ replacement?: string }>;
+}): boolean {
+  // STAGE 1: Hard filters (mandatory)
+  
+  // 1a. Focus legality: never violate focus boundaries
+  if (!isFocusLegal(args.replacement, args.focus)) {
+    return false;
+  }
+
+  // 1b. Duplicate legality: no duplicates or already-pivoted exercises
+  if (!isDuplicateLegal(args.replacement, args.currentWorkout, args.priorPivots)) {
+    return false;
+  }
+
+  // 1c. Perceptual redundancy: suppress same-role saturation
+  if (exceedsPerceptualRedundancyThreshold(args.replacement, args.currentWorkout)) {
+    return false;
+  }
+
+  // 1d. Workout integrity: ensure replacement maintains structural balance
+  // If replacing an exercise, verify the replacement serves a similar structural role
+  if (args.originalExercise) {
+    // Replacement should have similar muscle group or movement pattern
+    const similarMuscle = args.replacement.primaryMuscle === args.originalExercise.primaryMuscle;
+    const similarPattern = args.replacement.movementPattern === args.originalExercise.movementPattern;
+    const similarKind = args.replacement.kind === args.originalExercise.kind;
+    
+    // Allow replacement if it matches at least one structural dimension
+    // (e.g., can replace Bench Press with Dumbbell Press: different movement, same muscle/kind)
+    const hasStructuralConnection = similarMuscle || (similarPattern && similarKind);
+    if (!hasStructuralConnection) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function isDirectEmphasisForOrdering(ex: ExerciseMeta, emphasis: ParsedEmphasis | null | undefined): boolean {
   return isDirectEmphasisExercise(ex, emphasis);
 }
@@ -472,8 +697,9 @@ export function scoreExercise(args: {
   memory?: AdaptiveMemory;
   emphasis?: ParsedEmphasis | null;
   emphasisTargets?: EmphasisScoringTargets | null;
+  picked?: ExerciseMeta[];
 }) {
-  const { ex, focus, sleep, energy, soreness, note, recent, usedPatterns, equipmentContext, memory, emphasis, emphasisTargets } = args;
+  const { ex, focus, sleep, energy, soreness, note, recent, usedPatterns, equipmentContext, memory, emphasis, emphasisTargets, picked = [] } = args;
   const f = FOCUS_RULES[focus];
   const n = note.toLowerCase();
   let score = 0;
@@ -498,6 +724,14 @@ export function scoreExercise(args: {
   // Variety pressure from recent history
   const recentCanon = new Set(recent.map(canonicalName));
   if (recentCanon.has(canonicalName(ex.name))) { score -= 9; reasons.push("recent-repetition-penalty"); }
+
+  // Perceptual redundancy suppression: penalize exercises that fill the same perceptual role as already-picked exercises.
+  // This prevents workouts from feeling machine-generated (e.g., two different calf raises in one session).
+  const redundancyPenalty = perceptualRedundancyPenalty(ex, picked);
+  if (redundancyPenalty < 0) {
+    score += redundancyPenalty;
+    reasons.push("perceptual-redundancy-penalty");
+  }
 
   // Adaptive memory soft modifiers
   const patternKey = ex.movementPattern;
@@ -789,6 +1023,24 @@ export function chooseExercises(args: {
     // Reserve final slots for explicit user emphasis guarantees.
     const mustReserveForEmphasis = activeMissingTargets.length > 0 && remainingSlots <= activeMissingTargets.length;
     const sorted = [...EXERCISES]
+      .filter((ex) => {
+        // HARD INVARIANT: Focus legality — reject exercises that violate focus boundaries
+        if (!isFocusLegal(ex, args.focus)) {
+          rejected.push({ exercise: ex.name, reason: "focus-invariant-violation" });
+          return false;
+        }
+        // HARD INVARIANT: Duplicate legality — never allow already-picked exercises
+        if (!isDuplicateLegal(ex, picked)) {
+          rejected.push({ exercise: ex.name, reason: "duplicate-invariant-violation" });
+          return false;
+        }
+        // HARD INVARIANT: Perceptual redundancy thresholds — suppress same-role saturation
+        if (exceedsPerceptualRedundancyThreshold(ex, picked)) {
+          rejected.push({ exercise: ex.name, reason: "perceptual-redundancy-threshold-violation" });
+          return false;
+        }
+        return true;
+      })
       .map((ex) => {
         const evald = scoreExercise({
           ...args,
@@ -799,6 +1051,7 @@ export function chooseExercises(args: {
           memory: args.memory,
           emphasis: args.emphasis,
           emphasisTargets,
+          picked,
         });
         return { ex, score: evald.score, reasons: evald.reasons };
       })
@@ -846,6 +1099,17 @@ export function chooseExercises(args: {
       const candidates = EXERCISES
         .filter((ex) => !picked.some((p) => canonicalName(p.name) === canonicalName(ex.name)))
         .filter((ex) => exerciseMatchesEmphasisTarget(ex, target))
+        .filter((ex) => {
+          // HARD INVARIANT: Focus legality — only consider focus-legal candidates
+          if (!isFocusLegal(ex, args.focus)) {
+            return false;
+          }
+          // HARD INVARIANT: Perceptual redundancy — reject if would exceed threshold
+          if (exceedsPerceptualRedundancyThreshold(ex, picked)) {
+            return false;
+          }
+          return true;
+        })
         .map((ex) => {
           const evald = scoreExercise({
             ...args,
@@ -856,6 +1120,7 @@ export function chooseExercises(args: {
             memory: args.memory,
             emphasis: args.emphasis,
             emphasisTargets: finalEmphasisTargets,
+            picked,
           });
           return { ex, score: evald.score };
         })
@@ -989,6 +1254,7 @@ export function chooseExercises(args: {
         if (replaceIdx >= 0) {
           const usedPatterns = new Set(picked.map((p) => p.movementPattern));
           const tryCandidate = (candidate: ExerciseMeta) => {
+            const pickedMinusReplacement = picked.filter((p, j) => j !== replaceIdx);
             const scoreEval = scoreExercise({
               ...args,
               ex: candidate,
@@ -998,6 +1264,7 @@ export function chooseExercises(args: {
               memory: args.memory,
               emphasis: args.emphasis,
               emphasisTargets: emphasisTargetsNow,
+              picked: pickedMinusReplacement,
             }).score;
 
             if (scoreEval < 0) return null;

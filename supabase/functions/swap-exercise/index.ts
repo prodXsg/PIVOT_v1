@@ -1,5 +1,5 @@
 import { callGemini, corsHeaders, json, sanitizeInput } from "../_shared/gemini.ts";
-import { EXERCISES, canonicalName, inferFocus, scoreExercise, shouldDebugAdaptive } from "../_shared/adaptive.ts";
+import { EXERCISES, canonicalName, inferFocus, scoreExercise, shouldDebugAdaptive, isFocusLegal, isDuplicateLegal } from "../_shared/adaptive.ts";
 
 function chooseDeterministicReplacement(args: {
   focus: ReturnType<typeof inferFocus>;
@@ -9,6 +9,8 @@ function chooseDeterministicReplacement(args: {
   note: string;
   equipmentContext: string;
   recentExercises: string[];
+  currentWorkout?: Array<{ name: string }>;
+  priorPivots?: Array<{ replacement?: string }>;
 }) {
   const c = `${args.constraint} ${args.note}`.toLowerCase();
   const pool = EXERCISES;
@@ -19,7 +21,15 @@ function chooseDeterministicReplacement(args: {
   const time = c.includes("time") || c.includes("late") || c.includes("minutes") || c.includes("only") || c.includes("rush");
   const equipmentBusy = c.includes("busy") || c.includes("taken") || c.includes("no") || c.includes("unavailable") || c.includes("broken");
 
-  const candidates = pool.filter((e) => canonicalName(e.name) !== orig && !args.used.has(canonicalName(e.name)));
+  const candidates = pool
+    .filter((e) => canonicalName(e.name) !== orig && !args.used.has(canonicalName(e.name)))
+    .filter((e) => {
+      // HARD INVARIANT: Focus legality
+      if (!isFocusLegal(e, args.focus)) {
+        return false;
+      }
+      return true;
+    });
 
   const scored = candidates
     .map((e) => {
@@ -184,7 +194,19 @@ Deno.serve(async (req) => {
     const allowed = EXERCISES
       .filter((e) => {
         const entry = pivotScoring.find((s) => canonicalName(s.name) === canonicalName(e.name));
-        return (entry?.score ?? -999) > -10;
+        // Soft scoring filter: only consider exercises with reasonable scores
+        if ((entry?.score ?? -999) <= -10) {
+          return false;
+        }
+        // HARD INVARIANT: Focus legality — only allow focus-legal exercises
+        if (!isFocusLegal(e, focus)) {
+          return false;
+        }
+        // HARD INVARIANT: Duplicate check — reject if already used
+        if (used.has(canonicalName(e.name))) {
+          return false;
+        }
+        return true;
       });
     const allowedText = allowed.map((e) => `- ${e.name}`).join("\n");
 
@@ -224,6 +246,8 @@ Deno.serve(async (req) => {
         note: sanitizeInput(String(note ?? ""), 120),
         equipmentContext: sanitizeInput(String(equipment ?? "Full Gym"), 60),
         recentExercises: Array.isArray(recentExercises) ? recentExercises.map((x: unknown) => String(x)) : [],
+        currentWorkout: Array.isArray(currentExercises) ? currentExercises.map((x: unknown) => ({ name: String(x) })) : undefined,
+        priorPivots: Array.isArray(priorPivots) ? priorPivots : undefined,
       });
       if (det) return json(det);
       return json(fallbackReplacement(safeConstraint));
