@@ -29,6 +29,12 @@ export type EquipmentType = "barbell" | "dumbbell" | "machine" | "cable" | "body
 export type JointStress = "low" | "moderate" | "high";
 export type Level = "beginner" | "intermediate" | "advanced";
 
+/** Prescription type describes HOW an exercise should be prescribed, not just sets/reps. */
+export type PrescriptionType = "reps" | "timed" | "amrap" | "distance" | "interval";
+
+/** Core specialization role for grouping core exercises by their training intention. */
+export type CoreRole = "anti-extension" | "anti-lateral-flexion" | "anti-rotation" | "flexion" | "rotation" | "carries" | "stability";
+
 export type ExerciseMeta = {
   name: string;
   primaryMuscle: Muscle;
@@ -42,6 +48,12 @@ export type ExerciseMeta = {
   fatigueCost: number; // 1-10
   pivotTags: string[];
   kind: "compound" | "accessory";
+  /** Exercise prescription type: how to prescribe (reps, timed, etc.). */
+  prescriptionType?: PrescriptionType;
+  /** Default prescription suggestion for the exercise (e.g. "30-45 sec" for Plank, "8-10" for curl). */
+  defaultPrescription?: string;
+  /** For core exercises: specialization role (anti-extension, rotation, etc.). */
+  coreRole?: CoreRole;
 };
 
 export type AdaptiveMemory = {
@@ -124,6 +136,18 @@ function countCrossDomainExplicitSelections(emphasis: ParsedEmphasis | null | un
   if (emphasis.rearDeltBoost) n++;
   if (emphasis.forearmsBoost) n++;
   return n;
+}
+
+/**
+ * For Core emphasis, determine how many core specialization slots should be reserved.
+ * Core emphasis on longer sessions (60+ mins / 7+ exercises) should dedicate multiple slots to different core roles.
+ * Shorter sessions reserve 1-2 core slots.
+ */
+function coreEmphasisSlotAllocation(maxExercises: number, timeMinutes: number): number {
+  if (maxExercises <= 4) return 1; // Very short sessions: 1 core exercise
+  if (maxExercises <= 6) return 2; // Standard sessions: 1-2 core exercises
+  if (timeMinutes >= 60 && maxExercises >= 7) return 3; // 60+ mins: 2-3 core specializations
+  return 2; // Default: 2 core slots
 }
 
 /**
@@ -239,6 +263,28 @@ function isDeltIsolation(ex: ExerciseMeta): boolean {
 
 function isForearmIntentExercise(ex: ExerciseMeta): boolean {
   return isPerceptualForearmRepresentative(ex);
+}
+
+/**
+ * Get core role for grouping core exercises by specialization.
+ * Returns null if not a core exercise or role not specified.
+ */
+function getCoreRole(ex: ExerciseMeta): CoreRole | null {
+  if (ex.primaryMuscle !== "core") return null;
+  return ex.coreRole ?? null;
+}
+
+/**
+ * Count distinct core roles already represented in picked set.
+ * Used to ensure core emphasis includes specialization diversity.
+ */
+function countDistinctCoreRoles(picked: ExerciseMeta[]): Set<CoreRole> {
+  const roles = new Set<CoreRole>();
+  for (const ex of picked) {
+    const role = getCoreRole(ex);
+    if (role) roles.add(role);
+  }
+  return roles;
 }
 
 /**
@@ -577,13 +623,13 @@ export function parseFocusEmphasis(raw: unknown): ParsedEmphasis {
 }
 
 export const EXERCISES: ExerciseMeta[] = [
-  { name: "Dumbbell Bench Press", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 420, fatigueCost: 7, pivotTags: ["no-barbell", "bench-required", "chest-dominant-push"], kind: "compound" },
+  { name: "Dumbbell Bench Press", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 420, fatigueCost: 7, pivotTags: ["no-barbell", "bench-required", "chest-dominant-push"], kind: "compound", prescriptionType: "reps", defaultPrescription: "6-8" },
   { name: "Machine Chest Press", primaryMuscle: "chest", secondaryMuscles: ["triceps"], movementPattern: "horizontal-press", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly", "chest-dominant-push"], kind: "compound" },
   { name: "Incline Dumbbell Press", primaryMuscle: "chest", secondaryMuscles: ["shoulders", "triceps"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["bench-required", "chest-dominant-push"], kind: "compound" },
   { name: "Push-up Drop Set", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["bodyweight"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 180, fatigueCost: 5, pivotTags: ["time-crunch", "no-equipment", "chest-dominant-push"], kind: "accessory" },
   { name: "Seated Dumbbell Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "high", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["overhead", "shoulder-dominant-push"], kind: "compound" },
   { name: "Machine Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly", "overhead", "shoulder-dominant-push"], kind: "compound" },
-  { name: "Cable Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["cable"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["shoulder-friendly", "shoulder-isolation", "delt-isolation"], kind: "accessory" },
+  { name: "Cable Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["cable"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["shoulder-friendly", "shoulder-isolation", "delt-isolation"], kind: "accessory", prescriptionType: "reps", defaultPrescription: "12-15" },
   { name: "Dumbbell Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["dumbbell"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["no-cable", "shoulder-isolation", "delt-isolation"], kind: "accessory" },
   { name: "Triceps Rope Pushdown", primaryMuscle: "triceps", secondaryMuscles: [], movementPattern: "elbow-extension", equipment: ["cable"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["joint-friendly"], kind: "accessory" },
   { name: "Overhead Cable Triceps Extension", primaryMuscle: "triceps", secondaryMuscles: [], movementPattern: "elbow-extension", equipment: ["cable"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 240, fatigueCost: 4, pivotTags: ["overhead"], kind: "accessory" },
@@ -606,9 +652,15 @@ export const EXERCISES: ExerciseMeta[] = [
   { name: "Walking Lunges", primaryMuscle: "glutes", secondaryMuscles: ["quads", "hamstrings"], movementPattern: "lunge", equipment: ["dumbbell", "bodyweight"], unilateral: true, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["unilateral"], kind: "compound" },
   { name: "Split Squat", primaryMuscle: "glutes", secondaryMuscles: ["quads"], movementPattern: "lunge", equipment: ["dumbbell", "bodyweight"], unilateral: true, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["unilateral"], kind: "compound" },
   { name: "Hip Thrust (Machine)", primaryMuscle: "glutes", secondaryMuscles: ["hamstrings"], movementPattern: "hinge", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 330, fatigueCost: 6, pivotTags: ["glute-focused", "posterior-chain", "hinge-dominant-lower"], kind: "compound" },
-  { name: "Standing Calf Raise", primaryMuscle: "calves", secondaryMuscles: [], movementPattern: "carry", equipment: ["machine", "bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 2, pivotTags: ["calves"], kind: "accessory" },
-  { name: "Seated Calf Raise", primaryMuscle: "calves", secondaryMuscles: [], movementPattern: "carry", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 2, pivotTags: ["calves"], kind: "accessory" },
-  { name: "Plank", primaryMuscle: "core", secondaryMuscles: [], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 150, fatigueCost: 2, pivotTags: ["core", "core-direct", "trunk-stability"], kind: "accessory" },
+  { name: "Standing Calf Raise", primaryMuscle: "calves", secondaryMuscles: [], movementPattern: "carry", equipment: ["machine", "bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 2, pivotTags: ["calves"], kind: "accessory", prescriptionType: "reps", defaultPrescription: "12-15" },
+  { name: "Seated Calf Raise", primaryMuscle: "calves", secondaryMuscles: [], movementPattern: "carry", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 2, pivotTags: ["calves"], kind: "accessory", prescriptionType: "reps", defaultPrescription: "12-15" },
+  { name: "Plank", primaryMuscle: "core", secondaryMuscles: [], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 150, fatigueCost: 2, pivotTags: ["core", "core-direct", "trunk-stability"], kind: "accessory", prescriptionType: "timed", defaultPrescription: "30-45 sec", coreRole: "anti-extension" },
+  { name: "Side Plank", primaryMuscle: "core", secondaryMuscles: ["shoulders"], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 120, fatigueCost: 2, pivotTags: ["core", "core-direct", "trunk-stability"], kind: "accessory", prescriptionType: "timed", defaultPrescription: "20-30 sec", coreRole: "anti-lateral-flexion" },
+  { name: "Ab Wheel Rollout", primaryMuscle: "core", secondaryMuscles: ["chest"], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 180, fatigueCost: 4, pivotTags: ["core", "core-direct", "anti-extension"], kind: "accessory", prescriptionType: "reps", defaultPrescription: "8-12", coreRole: "anti-extension" },
+  { name: "Pallof Press (Cable)", primaryMuscle: "core", secondaryMuscles: ["chest", "shoulders"], movementPattern: "core-stability", equipment: ["cable"], unilateral: true, jointStress: "low", level: "intermediate", estimatedTimeSec: 180, fatigueCost: 3, pivotTags: ["core", "core-direct", "trunk-stability"], kind: "accessory", prescriptionType: "reps", defaultPrescription: "10-12", coreRole: "anti-rotation" },
+  { name: "Farmer Carry", primaryMuscle: "core", secondaryMuscles: ["trapezius", "forearms"], movementPattern: "carry", equipment: ["dumbbell"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 180, fatigueCost: 3, pivotTags: ["core", "core-direct", "carries"], kind: "accessory", prescriptionType: "distance", defaultPrescription: "40 meters", coreRole: "carries" },
+  { name: "Dead Bug", primaryMuscle: "core", secondaryMuscles: [], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 120, fatigueCost: 2, pivotTags: ["core", "core-direct", "trunk-stability", "beginner-friendly"], kind: "accessory", prescriptionType: "reps", defaultPrescription: "10-12 per side", coreRole: "anti-extension" },
+  { name: "Hollow Body Hold", primaryMuscle: "core", secondaryMuscles: ["chest"], movementPattern: "core-stability", equipment: ["bodyweight"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 120, fatigueCost: 2, pivotTags: ["core", "core-direct", "trunk-stability", "beginner-friendly"], kind: "accessory", prescriptionType: "timed", defaultPrescription: "20-30 sec", coreRole: "stability" },
 ];
 
 export function canonicalName(s: string): string {
@@ -907,6 +959,7 @@ export function chooseExercises(args: {
   equipmentContext: string;
   memory?: AdaptiveMemory;
   emphasis?: ParsedEmphasis | null;
+  timeMinutes?: number;
 }) {
   const usedPatterns = new Set<MovementPattern>();
   const picked: ExerciseMeta[] = [];

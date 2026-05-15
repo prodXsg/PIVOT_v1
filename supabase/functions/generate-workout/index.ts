@@ -222,6 +222,7 @@ Deno.serve(async (req) => {
       equipmentContext,
       memory: adaptiveMemory,
       emphasis: emphasisForScoring,
+      timeMinutes: time,
     });
     const picked = rankedResult.picked.slice(0, rules.maxExercises);
     if (!picked.length) throw new Error("No deterministic exercises available");
