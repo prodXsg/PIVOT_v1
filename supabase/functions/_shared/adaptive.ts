@@ -302,8 +302,11 @@ function getPerceptualRole(ex: ExerciseMeta): PerceptualRole {
   // Calf isolations: all grouped together
   if (ex.primaryMuscle === "calves") return "calf-isolation";
 
-  // Core direct: group all planks, ab-wheels, etc.
-  if (isCoreDirect(ex)) return "core-direct";
+  // Core direct: differentiate by specialization role so distinct roles can coexist in one session
+  if (isCoreDirect(ex)) {
+    if (ex.coreRole) return `core-${ex.coreRole}`;
+    return "core-direct";
+  }
 
   // Chest isolations: pec-deck, cable-fly grouped together
   if (isChestIsolation(ex)) return "chest-fly";
@@ -450,7 +453,7 @@ export function isDuplicateLegal(ex: ExerciseMeta, currentWorkout: ExerciseMeta[
  * Counts how many exercises with the same perceptual role are already selected.
  * Returns true if adding this exercise would exceed safe thresholds.
  */
-function exceedsPerceptualRedundancyThreshold(ex: ExerciseMeta, currentWorkout: ExerciseMeta[]): boolean {
+export function exceedsPerceptualRedundancyThreshold(ex: ExerciseMeta, currentWorkout: ExerciseMeta[]): boolean {
   const role = getPerceptualRole(ex);
   const sameRoleCount = currentWorkout.filter((e) => getPerceptualRole(e) === role).length;
 
@@ -626,7 +629,7 @@ export const EXERCISES: ExerciseMeta[] = [
   { name: "Dumbbell Bench Press", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 420, fatigueCost: 7, pivotTags: ["no-barbell", "bench-required", "chest-dominant-push"], kind: "compound", prescriptionType: "reps", defaultPrescription: "6-8" },
   { name: "Machine Chest Press", primaryMuscle: "chest", secondaryMuscles: ["triceps"], movementPattern: "horizontal-press", equipment: ["machine"], unilateral: false, jointStress: "low", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly", "chest-dominant-push"], kind: "compound" },
   { name: "Incline Dumbbell Press", primaryMuscle: "chest", secondaryMuscles: ["shoulders", "triceps"], movementPattern: "horizontal-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "moderate", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["bench-required", "chest-dominant-push"], kind: "compound" },
-  { name: "Push-up Drop Set", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["bodyweight"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 180, fatigueCost: 5, pivotTags: ["time-crunch", "no-equipment", "chest-dominant-push"], kind: "accessory" },
+  { name: "Push-up Drop Set", primaryMuscle: "chest", secondaryMuscles: ["triceps", "shoulders"], movementPattern: "horizontal-press", equipment: ["bodyweight"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 180, fatigueCost: 5, pivotTags: ["time-crunch", "no-equipment", "chest-dominant-push"], kind: "accessory", prescriptionType: "amrap", defaultPrescription: "max reps" },
   { name: "Seated Dumbbell Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["dumbbell", "bench"], unilateral: false, jointStress: "high", level: "intermediate", estimatedTimeSec: 390, fatigueCost: 7, pivotTags: ["overhead", "shoulder-dominant-push"], kind: "compound" },
   { name: "Machine Shoulder Press", primaryMuscle: "shoulders", secondaryMuscles: ["triceps"], movementPattern: "vertical-press", equipment: ["machine"], unilateral: false, jointStress: "moderate", level: "beginner", estimatedTimeSec: 360, fatigueCost: 6, pivotTags: ["joint-friendly", "overhead", "shoulder-dominant-push"], kind: "compound" },
   { name: "Cable Lateral Raise", primaryMuscle: "shoulders", secondaryMuscles: [], movementPattern: "abduction", equipment: ["cable"], unilateral: true, jointStress: "low", level: "beginner", estimatedTimeSec: 240, fatigueCost: 3, pivotTags: ["shoulder-friendly", "shoulder-isolation", "delt-isolation"], kind: "accessory", prescriptionType: "reps", defaultPrescription: "12-15" },
@@ -861,6 +864,17 @@ export function scoreExercise(args: {
       if (isCoreDirect(ex)) {
         score += 18;
         reasons.push("emphasis-core-direct");
+        // Novelty bonus: prefer core roles not yet represented in this session
+        if (ex.coreRole) {
+          const coveredRoles = countDistinctCoreRoles(picked);
+          if (!coveredRoles.has(ex.coreRole)) {
+            score += 8;
+            reasons.push("core-role-novelty-bonus");
+          } else {
+            score -= 8;
+            reasons.push("core-role-redundancy-penalty");
+          }
+        }
       } else if (ex.secondaryMuscles.includes("core") && ex.primaryMuscle !== "core") {
         score -= 6;
         reasons.push("emphasis-core-avoid-incidental");
@@ -964,6 +978,10 @@ export function chooseExercises(args: {
   const usedPatterns = new Set<MovementPattern>();
   const picked: ExerciseMeta[] = [];
   const rejected: Array<{ exercise: string; reason: string }> = [];
+  const coreInEmphasis = !!(args.emphasis?.muscles.includes("core"));
+  const coreQuota = coreInEmphasis
+    ? coreEmphasisSlotAllocation(args.maxExercises, args.timeMinutes ?? 45)
+    : 0;
   let lastSorted: { ex: ExerciseMeta; score: number }[] = [];
   let lastDebugScoring: ScoringBreakdown[] = [];
   const arbitrationDebug: {
@@ -995,7 +1013,9 @@ export function chooseExercises(args: {
       return false;
     }
     const dupPrimary = picked.filter((p) => p.primaryMuscle === ex.primaryMuscle).length;
-    if (dupPrimary >= 2) {
+    // For core-emphasis sessions, allow up to coreQuota core exercises; default cap is 2
+    const dupLimit = (coreInEmphasis && ex.primaryMuscle === "core") ? Math.max(2, coreQuota) : 2;
+    if (dupPrimary >= dupLimit) {
       rejected.push({ exercise: ex.name, reason: "primary-muscle-overconcentration" });
       return false;
     }
@@ -1069,8 +1089,12 @@ export function chooseExercises(args: {
         );
     const directEmphasisQuota =
       requestedEmphasisCount <= 0 ? 0 : Math.max(computedDirectQuota, layer2VisibilityFloor);
+    // Core emphasis uses a time-aware slot floor so longer sessions get proportionally more core capacity
+    const effectiveDirectQuota = coreInEmphasis
+      ? Math.max(directEmphasisQuota, coreQuota)
+      : directEmphasisQuota;
     const pickedDirectEmphasisCount = picked.filter((p) => isDirectEmphasisExercise(p, args.emphasis)).length;
-    const neededDirectQuota = Math.max(0, directEmphasisQuota - pickedDirectEmphasisCount);
+    const neededDirectQuota = Math.max(0, effectiveDirectQuota - pickedDirectEmphasisCount);
     const activeMissingTargets = missingTargets.slice(0, emphasisCapacity);
     const remainingSlots = args.maxExercises - picked.length;
     // Reserve final slots for explicit user emphasis guarantees.

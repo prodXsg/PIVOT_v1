@@ -9,6 +9,7 @@ import {
   shouldDebugAdaptive,
   parseFocusEmphasis,
   type ParsedEmphasis,
+  type PrescriptionType,
 } from "../_shared/adaptive.ts";
 
 type RawPlan = {
@@ -26,11 +27,23 @@ function timeRules(time: number) {
   if (time <= 20) return { maxExercises: 4, minDuration: 15, maxDuration: 20, label: "< 20 min" };
   if (time <= 35) return { maxExercises: 5, minDuration: 25, maxDuration: 35, label: "30 min" };
   if (time <= 50) return { maxExercises: 6, minDuration: 40, maxDuration: 50, label: "45 min" };
-  return { maxExercises: 7, minDuration: 55, maxDuration: 70, label: "60+ min" };
+  if (time <= 70) return { maxExercises: 7, minDuration: 60, maxDuration: 70, label: "60 min" };
+  return { maxExercises: 8, minDuration: 75, maxDuration: 85, label: "75+ min" };
 }
 
-function setsReps(sets: number, reps: string) {
-  return `${sets} sets - ${sanitizeInput(reps, 30)} reps`;
+function formatPrescription(sets: number, prescription: string, type: PrescriptionType = "reps"): string {
+  switch (type) {
+    case "timed":
+      return `${sets} sets × ${sanitizeInput(prescription, 30)}`;
+    case "distance":
+      return `${sets} rounds × ${sanitizeInput(prescription, 30)}`;
+    case "amrap":
+      return `${sets} rounds - AMRAP`;
+    case "interval":
+      return `${sets} rounds × ${sanitizeInput(prescription, 30)}`;
+    default:
+      return `${sets} sets - ${sanitizeInput(prescription, 30)} reps`;
+  }
 }
 
 function emphasisLabelFromMuscle(m: string): string {
@@ -94,17 +107,23 @@ function fallbackFromDeterministic(
     duration: clamp(estimated, rules.minDuration, rules.maxDuration, rules.maxDuration),
     rationale: lowReadiness
       ? `Built around ${focus} with reduced joint stress and fatigue to match your readiness.`
-      : `Built around ${focus} with balanced movement patterns for your selected time window.`,
-    exercises: picked.map((e, i) => ({
-      id: `d${i + 1}`,
-      name: e.name,
-      setsReps: setsReps(sets, reps),
-      cue: undefined,
-      primaryMuscle: e.primaryMuscle,
-      movementPattern: e.movementPattern,
-      estimatedTimeSec: e.estimatedTimeSec,
-      fatigueCost: e.fatigueCost,
-    })),
+      : picked.length >= 7
+        ? `Full-volume ${focus} session across strength, development, and finisher phases.`
+        : `Built around ${focus} with balanced movement patterns for your selected time window.`,
+    exercises: picked.map((e, i) => {
+      const prescType = e.prescriptionType ?? "reps";
+      const prescription = (prescType !== "reps" && e.defaultPrescription) ? e.defaultPrescription : reps;
+      return {
+        id: `d${i + 1}`,
+        name: e.name,
+        setsReps: formatPrescription(sets, prescription, prescType),
+        cue: undefined,
+        primaryMuscle: e.primaryMuscle,
+        movementPattern: e.movementPattern,
+        estimatedTimeSec: e.estimatedTimeSec,
+        fatigueCost: e.fatigueCost,
+      };
+    }),
     reasoning: {
       summary: lowReadiness
         ? "Adjusted intensity down for readiness while preserving training intent."
@@ -140,21 +159,38 @@ function buildPrompt(params: {
   emphasisNote: string;
   rules: ReturnType<typeof timeRules>;
   ranked: { name: string; score: number }[];
-  chosenNames: string[];
+  chosenExercises: Array<{ name: string; prescriptionType?: PrescriptionType; defaultPrescription?: string }>;
   sleep: number;
   energy: number;
   soreness: number;
   note: string;
 }) {
   const rankedText = params.ranked.map((r) => `- ${r.name} (score ${r.score})`).join("\n");
-  const chosenText = params.chosenNames.map((n) => `- ${n}`).join("\n");
+  const chosenText = params.chosenExercises.map((e) => `- ${e.name}`).join("\n");
+  const nonRepExercises = params.chosenExercises.filter(
+    (e) => e.prescriptionType && e.prescriptionType !== "reps",
+  );
+  const prescriptionBlock = nonRepExercises.length > 0
+    ? `\nPrescription types — use these EXACT values in the "reps" field:\n${
+      nonRepExercises.map((e) =>
+        `- ${e.name}: ${e.prescriptionType} — write "${e.defaultPrescription}" as the reps value. Write form cues that reference ${e.prescriptionType === "timed" ? "duration/time" : e.prescriptionType === "distance" ? "distance/load" : "effort"}, not rep counts.`
+      ).join("\n")
+    }`
+    : "";
+  const sessionStructureBlock = params.rules.maxExercises >= 7
+    ? `\nSession structure guidance (${params.rules.maxExercises} exercises, ${params.rules.label}):
+- Exercises 1-3: Compound strength block — primary movers, lower rep range (5-8 or 6-10), heavier intent.
+- Exercises 4-5: Development block — accessory lifts and secondary movers, moderate reps (8-12).
+- Exercises 6+: Finisher block — direct/isolation work, higher reps (10-15) or time-based conditioning.
+Write a rationale that acknowledges this multi-phase session structure.`
+    : "";
   return `ABSOLUTE RULES - FOLLOW FIRST:
 1. Today's workout focus is ${params.focus}${params.emphasisNote}. You MUST NOT change the base session type (${params.focus}).
 2. duration_minutes must be ${params.rules.minDuration}-${params.rules.maxDuration}.
 3. Use exactly these selected exercises and preserve their order intent:
 ${chosenText}
 4. Do not add or replace exercises outside the selected list.
-5. Keep total exercises <= ${params.rules.maxExercises}.
+5. Keep total exercises <= ${params.rules.maxExercises}.${prescriptionBlock}${sessionStructureBlock}
 
 Ranked candidate context (already filtered/scored by backend):
 ${rankedText}
@@ -172,8 +208,8 @@ Output only valid JSON:
     {
       "name": "Exact exercise name from selected list",
       "sets": 3,
-      "reps": "8-10",
-      "form_cue": "Optional one-line cue"
+      "reps": "8-10 for rep-based; use the prescribed value for timed/distance/amrap exercises",
+      "form_cue": "Optional one-line cue matching the prescription type"
     }
   ]
 }`;
@@ -236,7 +272,11 @@ Deno.serve(async (req) => {
         emphasisNote,
         rules,
         ranked: rankedResult.ranked.map((r) => ({ name: r.ex.name, score: Math.round(r.score) })),
-        chosenNames,
+        chosenExercises: picked.map((e) => ({
+          name: e.name,
+          prescriptionType: e.prescriptionType,
+          defaultPrescription: e.defaultPrescription,
+        })),
         sleep,
         energy,
         soreness,
@@ -262,12 +302,18 @@ Deno.serve(async (req) => {
 
     const exercises = picked.map((ex, i) => {
       const k = canonicalName(ex.name);
-      const plan = cueByName.get(k) ?? { sets: defaultSets, reps: defaultReps, cue: undefined };
+      const aiPlan = cueByName.get(k);
+      const sets = aiPlan?.sets ?? defaultSets;
+      const prescType = ex.prescriptionType ?? "reps";
+      // For non-rep prescriptions, use the exercise's defaultPrescription rather than the AI-generated value
+      const prescription = (prescType !== "reps" && ex.defaultPrescription)
+        ? ex.defaultPrescription
+        : (aiPlan?.reps ?? defaultReps);
       return {
         id: `g${i + 1}`,
         name: ex.name,
-        setsReps: setsReps(plan.sets, plan.reps),
-        cue: plan.cue,
+        setsReps: formatPrescription(sets, prescription, prescType),
+        cue: aiPlan?.cue,
       };
     });
 
@@ -282,11 +328,19 @@ Deno.serve(async (req) => {
     const reasoning = {
       summary: lowReadiness
         ? "Reduced fatigue load due to readiness signals while preserving workout identity."
-        : "Built a balanced session aligned to focus, time, and recent history.",
-      selection: [
-        "Ranked exercises by focus fit, movement-pattern balance, and variety pressure.",
-        "Protected against duplicate movement patterns in the same session.",
-      ],
+        : picked.length >= 7
+          ? "Built a full-volume session with distinct strength, development, and finisher phases."
+          : "Built a balanced session aligned to focus, time, and recent history.",
+      selection: picked.length >= 7
+        ? [
+            "Ranked exercises by focus fit, movement-pattern balance, and variety pressure.",
+            "Organized into strength, development, and finisher phases for session depth.",
+            "Protected against duplicate movement patterns across all phases.",
+          ]
+        : [
+            "Ranked exercises by focus fit, movement-pattern balance, and variety pressure.",
+            "Protected against duplicate movement patterns in the same session.",
+          ],
       constraints: [
         `Hard duration band applied: ${rules.minDuration}-${rules.maxDuration} minutes.`,
         `Hard max exercise count applied: ${rules.maxExercises}.`,
