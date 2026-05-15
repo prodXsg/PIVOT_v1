@@ -267,3 +267,5 @@ Planned evolution areas include:
 # License
 
 Private project. All rights reserved.
+
+Force rebuild
