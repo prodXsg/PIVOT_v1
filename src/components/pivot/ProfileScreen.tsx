@@ -35,10 +35,6 @@ function formatTime(minutes: number): string {
 
 export function ProfileScreen({ onBack }: { onBack?: () => void }) {
   const {
-    setReturning,
-    setTodayWorkout,
-    setWorkoutState,
-    setTab,
     theme,
     toggleTheme,
     userProfile,
@@ -101,27 +97,6 @@ export function ProfileScreen({ onBack }: { onBack?: () => void }) {
     setConfirmAction(null);
     window.dispatchEvent(new Event("pivot:reset-app"));
     toast("Account deleted");
-  };
-
-  const simulateReturn = () => {
-    setReturning(true);
-    setTodayWorkout(null);
-    setWorkoutState("NO_WORKOUT");
-    try {
-      localStorage.removeItem("pivot_last_checkin_date");
-      localStorage.removeItem("pivot_workout_state");
-      localStorage.removeItem("pivot_workout_state_date");
-      localStorage.removeItem("pivot_today_workout");
-      window.dispatchEvent(new Event("pivot:checkin-updated"));
-    } catch {}
-    setTab("home");
-    onBack?.();
-    toast("Simulated 4-day absence");
-  };
-
-  const resetApp = () => {
-    window.dispatchEvent(new Event("pivot:reset-app"));
-    toast("App reset — welcome screen loading");
   };
 
   const stats = [
@@ -359,33 +334,6 @@ export function ProfileScreen({ onBack }: { onBack?: () => void }) {
             />
           )}
         </Section>
-
-        {/* Demo Tools — near-invisible */}
-        <div className="mt-8" style={{ backgroundColor: "rgba(255,255,255,0.01)" }}>
-          <section className="pt-4 pb-4">
-            <h2
-              className="px-4 pb-2"
-              style={{ fontSize: 10, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", color: "rgba(255,255,255,0.18)" }}
-            >
-              DEMO TOOLS (for demo only)
-            </h2>
-            <div>
-              <button
-                onClick={resetApp}
-                className="w-full h-14 px-4 flex items-center justify-between text-left"
-                style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
-              >
-                <span style={{ fontSize: 14, color: "rgba(255,255,255,0.25)" }}>Reset Welcome Screen</span>
-              </button>
-              <button
-                onClick={simulateReturn}
-                className="w-full h-14 px-4 flex items-center justify-between text-left"
-              >
-                <span style={{ fontSize: 14, color: "rgba(255,255,255,0.25)" }}>Simulate Returning After 4 Days</span>
-              </button>
-            </div>
-          </section>
-        </div>
 
         {/* About */}
         <Section title="ABOUT">
