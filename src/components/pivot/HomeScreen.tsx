@@ -376,15 +376,7 @@ export function HomeScreen({
             </p>
           )}
 
-          <div className="mt-4 flex justify-center" style={{ animation: "home-rise 300ms 120ms ease-out both" }}>
-            <button
-              onClick={() => setTab("plan")}
-              className="inline-flex items-center gap-1 text-[13px] font-semibold text-primary hover:opacity-75 transition-opacity"
-            >
-              View plan
-              <ChevronRight size={14} strokeWidth={2.5} />
-            </button>
-          </div>
+
         </>
       )}
 

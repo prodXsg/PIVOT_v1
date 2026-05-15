@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import { Workout } from "@/lib/mockData";
 import { supabase } from "@/integrations/supabase/client";
 
-export type Tab = "home" | "plan" | "insights" | "profile";
+export type Tab = "home" | "insights" | "profile";
 export type Theme = "light" | "dark";
 export type WorkoutState =
   | "NO_WORKOUT"

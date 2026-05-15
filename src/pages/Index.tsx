@@ -6,7 +6,6 @@ import { HomeScreen } from "@/components/pivot/HomeScreen";
 import { CheckInScreen } from "@/components/pivot/CheckInScreen";
 import { WorkoutIntentScreen, type ReadinessSnapshot } from "@/components/pivot/WorkoutIntentScreen";
 import { WorkoutScreen } from "@/components/pivot/WorkoutScreen";
-import { PlanScreen } from "@/components/pivot/PlanScreen";
 import { InsightsScreen } from "@/components/pivot/InsightsScreen";
 import { ProfileScreen } from "@/components/pivot/ProfileScreen";
 import { WelcomeScreen } from "@/components/pivot/WelcomeScreen";
@@ -102,7 +101,6 @@ function PivotApp() {
           "pivot_recent_pivots_v1",
           "pivot_session_quality_v1",
           "pivot_adaptive_memory_v1",
-          "pivot_plan_tab_unlocked",
           "pivot_total_pivots",
           "pivot_weekly_week_start",
           "pivot_weekly_completed",
@@ -284,7 +282,6 @@ function PivotApp() {
     <MobileFrame>
       <main className="flex-1 flex flex-col relative overflow-hidden">
         {tab === "home" && renderHomeFlow()}
-        {tab === "plan" && <PlanScreen />}
         {tab === "insights" && <InsightsScreen />}
         {tab === "profile" && <ProfileScreen />}
       </main>

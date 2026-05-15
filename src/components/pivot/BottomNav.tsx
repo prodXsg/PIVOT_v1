@@ -1,4 +1,4 @@
-import { Home, Calendar, BarChart3, User } from "lucide-react";
+import { Home, BarChart3, User } from "lucide-react";
 import { useApp, Tab } from "@/context/AppContext";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -15,7 +15,6 @@ const BASE_ITEMS_PRE: NavItem[] = [
 
 const BASE_ITEMS_POST: NavItem[] = [
   { id: "home",     label: "Home",     kind: "icon", Icon: Home },
-  { id: "plan",     label: "Plan",     kind: "icon", Icon: Calendar },
   { id: "insights", label: "Insights", kind: "icon", Icon: BarChart3 },
   { id: "profile",  label: "Profile",  kind: "avatar" },
 ];
@@ -52,13 +51,9 @@ export function BottomNav() {
           const { id, label } = item;
           const active = tab === id;
           const isPulsing = pulse === id;
-          const isPlanNew = id === "plan" && hasGeneratedWorkout;
 
           return (
-            <li
-              key={id}
-              style={isPlanNew ? { animation: "nav-fade-in 300ms ease-out both" } : undefined}
-            >
+            <li key={id}>
               <button
                 onClick={() => handleTap(id)}
                 aria-label={label}
