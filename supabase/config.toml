@@ -1,1 +1,7 @@
-project_id = "pfhfdqrnollhbnsphbqp"
+project_id = "pfhfdqrno11hbnsphbqp"
+
+[functions.generate-workout]
+verify_jwt = false
+
+[functions.swap-exercise]
+verify_jwt = false
